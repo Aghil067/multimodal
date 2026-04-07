@@ -1,0 +1,52 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.suo
+*.swp
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+venv310/
+
+# Env / secrets
+.env
+*.local
+
+# Logs / runtime files
+*.log
+backend/*.log
+frontend/*.log
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary / generated files
+temp_check.txt
+test_post_results.json
+test_results*.json
+test_travelmidwest.json
+backend/import_out.txt
+backend/install.log
+backend/err.txt
+backend/clean_props.json
+backend/feat.json
+backend/feat_clean.json
+backend/py_paths.txt
+backend/test2.json

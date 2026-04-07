@@ -1,0 +1,22 @@
+# Core
+fastapi
+uvicorn[standard]
+python-dotenv
+
+# HTTP
+httpx
+
+# Database (optional - system works without it)
+sqlalchemy
+
+# NLP / AI
+transformers
+torch
+scikit-learn
+
+# Data Processing
+pandas
+numpy
+
+# Utilities
+pydantic

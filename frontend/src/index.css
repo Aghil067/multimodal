@@ -1,0 +1,43 @@
+:root {
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  line-height: 1.6;
+  font-weight: 400;
+  color-scheme: dark;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  width: 100%;
+  background: #06080f;
+  color: #e2e8f0;
+}
+
+/* Override leaflet control styling */
+.leaflet-control-zoom a {
+  background: rgba(12, 16, 33, 0.85) !important;
+  color: #94a3b8 !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  backdrop-filter: blur(12px);
+}
+
+.leaflet-control-zoom a:hover {
+  background: rgba(22, 29, 58, 0.95) !important;
+  color: #e2e8f0 !important;
+}
+
+.leaflet-popup-content-wrapper {
+  border-radius: 10px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+.leaflet-popup-tip {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3) !important;
+}

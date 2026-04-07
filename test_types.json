@@ -1,0 +1,8 @@
+{
+  "/incidentMap.json?type=points": "Error: HTTP Error 500: ",
+  "/incidentMap.json?type=lines": "Error: HTTP Error 500: ",
+  "/constructionMap.json?type=points": "Error: HTTP Error 500: ",
+  "/constructionMap.json?type=lines": "Error: HTTP Error 500: ",
+  "/congestionMap.json?type=lines": "Error: HTTP Error 500: ",
+  "/weatherMap.json?type=points": "Error: HTTP Error 500: "
+}
