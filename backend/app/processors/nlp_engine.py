@@ -119,29 +119,40 @@ class NLPEngine:
     """Text analysis engine for disruption classification."""
 
     def __init__(self, use_transformers: bool = True):
+        self.use_transformers = use_transformers
         self.sentiment_pipeline = None
         self.zero_shot_pipeline = None
 
-        if use_transformers and TRANSFORMERS_AVAILABLE:
+    def _load_sentiment_pipeline(self):
+        """Lazy load sentiment analysis model."""
+        if self.sentiment_pipeline is None and self.use_transformers and TRANSFORMERS_AVAILABLE:
             try:
+                logger.info("Initializing sentiment analysis pipeline...")
                 self.sentiment_pipeline = pipeline(
                     "sentiment-analysis",
                     model="distilbert-base-uncased-finetuned-sst-2-english",
-                    device=-1  # CPU
+                    device=-1  # Force CPU
                 )
-                logger.info("Sentiment analysis pipeline loaded successfully")
+                logger.info("✅ Sentiment analysis pipeline loaded")
             except Exception as e:
                 logger.warning(f"Failed to load sentiment pipeline: {e}")
+        return self.sentiment_pipeline
 
+    def _load_zero_shot_pipeline(self):
+        """Lazy load zero-shot classification model."""
+        if self.zero_shot_pipeline is None and self.use_transformers and TRANSFORMERS_AVAILABLE:
             try:
+                logger.info("Initializing zero-shot classification pipeline (this may take a minute)...")
                 self.zero_shot_pipeline = pipeline(
                     "zero-shot-classification",
                     model="facebook/bart-large-mnli",
-                    device=-1
+                    device=-1  # Force CPU
                 )
-                logger.info("Zero-shot classification pipeline loaded successfully")
+                logger.info("✅ Zero-shot classification pipeline loaded")
             except Exception as e:
                 logger.warning(f"Failed to load zero-shot pipeline: {e}")
+        return self.zero_shot_pipeline
+
 
     def analyze_text(self, text: str) -> Dict:
         """
@@ -156,7 +167,8 @@ class NLPEngine:
         sentiment = self._analyze_sentiment(text)
 
         # 3. Enhanced classification with zero-shot if available
-        if self.zero_shot_pipeline and disruption_type == "general_disruption":
+        zs_pipeline = self._load_zero_shot_pipeline()
+        if zs_pipeline and disruption_type == "general_disruption":
             zs_result = self._zero_shot_classify(text)
             if zs_result["confidence"] > keyword_confidence:
                 disruption_type = zs_result["type"]
@@ -199,9 +211,10 @@ class NLPEngine:
 
     def _analyze_sentiment(self, text: str) -> Dict:
         """Analyze sentiment using transformers or fallback."""
-        if self.sentiment_pipeline:
+        s_pipeline = self._load_sentiment_pipeline()
+        if s_pipeline:
             try:
-                result = self.sentiment_pipeline(text[:512])[0]
+                result = s_pipeline(text[:512])[0]
                 return {
                     "label": result["label"].lower(),
                     "score": round(result["score"], 3)
@@ -233,6 +246,10 @@ class NLPEngine:
 
     def _zero_shot_classify(self, text: str) -> Dict:
         """Use zero-shot classification for more nuanced categorization."""
+        zs_pipeline = self._load_zero_shot_pipeline()
+        if not zs_pipeline:
+            return {"type": "general_disruption", "confidence": 0.0}
+
         candidate_labels = [
             "fuel shortage",
             "grocery shortage",
@@ -254,7 +271,7 @@ class NLPEngine:
         }
 
         try:
-            result = self.zero_shot_pipeline(text[:512], candidate_labels)
+            result = zs_pipeline(text[:512], candidate_labels)
             top_label = result["labels"][0]
             top_score = result["scores"][0]
             return {
