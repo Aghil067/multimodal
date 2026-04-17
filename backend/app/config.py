@@ -45,15 +45,9 @@ class Settings:
     SOCIAL_INTERVAL: int = int(os.getenv("SOCIAL_INTERVAL", "600"))    # 10 min
     NEWS_INTERVAL: int = int(os.getenv("NEWS_INTERVAL", "900"))        # 15 min
 
-    # CORS — allow all localhost/127 origins during development
-    CORS_ORIGINS: list = [
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:3000",
-        "http://localhost:8080",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ]
+    # CORS — allow origins from environment variable or localhost during development
+    CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:3000").split(",")
+
 
     # Disruption thresholds
     CONGESTION_THRESHOLD: float = float(os.getenv("CONGESTION_THRESHOLD", "0.6"))
