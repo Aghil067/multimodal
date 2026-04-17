@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { getDisruptionTimeline } from '../../services/api';
 
 function MiniSparkline({ data, color = '#818cf8', height = 40 }) {
@@ -34,14 +34,12 @@ function MiniSparkline({ data, color = '#818cf8', height = 40 }) {
 export default function TimelineChart() {
   const [timeline, setTimeline] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [currentScore, setCurrentScore] = useState(null);
 
   const fetchTimeline = async () => {
     setLoading(true);
     try {
       const res = await getDisruptionTimeline();
       setTimeline(res.data.timeline || []);
-      setCurrentScore(res.data.current_score);
     } catch (e) {
       console.warn('Timeline fetch failed:', e.message);
     } finally {

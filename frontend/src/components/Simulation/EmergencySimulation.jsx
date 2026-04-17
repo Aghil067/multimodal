@@ -143,7 +143,7 @@ const VEHICLE_TYPES = {
   },
 };
 
-const AMBIENT_VEHICLE_LIMIT = 42;
+const AMBIENT_VEHICLE_LIMIT = 140;
 const NODE_PRECISION = 5;
 const BASE_SPEED_MPS = 14;
 let trafficLightCache = { nodes: [], stamp: 0 };
@@ -174,7 +174,7 @@ function coordKey(point) {
   return `${point[0].toFixed(NODE_PRECISION)},${point[1].toFixed(NODE_PRECISION)}`;
 }
 
-function createVehicleIcon(vehicleType, variant = 0, opacity = 1) {
+function _createVehicleIcon(vehicleType, variant = 0, opacity = 1) {
   const def = VEHICLE_TYPES[vehicleType] || VEHICLE_TYPES.civilian_car;
   return L.divIcon({
     className: '',
@@ -212,7 +212,7 @@ function getPointAtDistance(path, distance) {
   return path[path.length - 1];
 }
 
-function getHeadingDegrees(current, next) {
+function _getHeadingDegrees(current, next) {
   if (!current || !next) return 0;
   const lngCorrection = Math.cos((current[0] * Math.PI) / 180);
   const dy = next[0] - current[0];
@@ -220,7 +220,7 @@ function getHeadingDegrees(current, next) {
   return Math.atan2(dx, dy) * (180 / Math.PI);
 }
 
-function getPathSlice(path, progress) {
+function _getPathSlice(path, progress) {
   if (!path || path.length < 2) return path || [];
   const clamped = Math.max(0, Math.min(progress, 1));
   const totalLength = polylineLength(path);
@@ -243,12 +243,11 @@ function getPathSlice(path, progress) {
 }
 
 function segmentNearHazard(a, b, center, radius) {
-  const midpoint = interpolate(a, b, 0.5);
-  return (
-    distanceMeters(a, center) <= radius ||
-    distanceMeters(b, center) <= radius ||
-    distanceMeters(midpoint, center) <= radius
-  );
+  for (let t = 0; t <= 1; t += 0.1) {
+    const pt = interpolate(a, b, t);
+    if (distanceMeters(pt, center) <= radius) return true;
+  }
+  return false;
 }
 
 function mergePaths(...paths) {
@@ -274,7 +273,7 @@ function pathTouchesHazard(path, center, radius) {
   return false;
 }
 
-function forceGreenLights(position, enabled) {
+function _forceGreenLights(position, enabled) {
   if (!enabled || !position) return;
   const now = Date.now();
   if (now - trafficLightCache.stamp > 1200 || !trafficLightCache.nodes.length) {
@@ -361,6 +360,7 @@ function findRoute(network, startPoint, endPoint, options = {}) {
 
   const blockedEdgeKeys = options.blockedEdgeKeys || new Set();
   const open = [startNode.id];
+  const inOpen = new Set([startNode.id]);
   const cameFrom = {};
   const gScore = { [startNode.id]: 0 };
   const fScore = {
@@ -370,13 +370,20 @@ function findRoute(network, startPoint, endPoint, options = {}) {
 
   while (open.length > 0) {
     let bestIndex = 0;
+    let minF = fScore[open[0]];
     for (let i = 1; i < open.length; i += 1) {
-      if ((fScore[open[i]] ?? Infinity) < (fScore[open[bestIndex]] ?? Infinity)) {
+      const f = fScore[open[i]] ?? Infinity;
+      if (f < minF) {
         bestIndex = i;
+        minF = f;
       }
     }
 
-    const currentId = open.splice(bestIndex, 1)[0];
+    const currentId = open[bestIndex];
+    open[bestIndex] = open[open.length - 1];
+    open.pop();
+    inOpen.delete(currentId);
+
     if (currentId === endNode.id) {
       const pathIds = [currentId];
       let walker = currentId;
@@ -391,15 +398,22 @@ function findRoute(network, startPoint, endPoint, options = {}) {
     const currentNode = network.nodes[currentId];
     currentNode.neighbors.forEach((neighbor) => {
       const edgeKey = `${currentId}->${neighbor.id}`;
-      if (blockedEdgeKeys.has(edgeKey)) return;
       if (visited.has(neighbor.id)) return;
 
-      const tentativeG = (gScore[currentId] ?? Infinity) + neighbor.weight;
+      let edgeWeight = neighbor.weight;
+      if (blockedEdgeKeys.has(edgeKey)) {
+        edgeWeight += 20000; // heavy penalty so trapped vehicles escape safely instead of remaining stuck
+      }
+
+      const tentativeG = (gScore[currentId] ?? Infinity) + edgeWeight;
       if (tentativeG < (gScore[neighbor.id] ?? Infinity)) {
         cameFrom[neighbor.id] = currentId;
         gScore[neighbor.id] = tentativeG;
         fScore[neighbor.id] = tentativeG + distanceMeters(network.nodes[neighbor.id].point, endNode.point);
-        if (!open.includes(neighbor.id)) open.push(neighbor.id);
+        if (!inOpen.has(neighbor.id)) {
+          open.push(neighbor.id);
+          inOpen.add(neighbor.id);
+        }
       }
     });
   }
@@ -472,6 +486,37 @@ function buildRandomRoute(network, scenarioRuntime, seed = 0) {
   return [fallbackNode.point, fallbackNode.point];
 }
 
+function getViewportCandidateNodeIds(map, network) {
+  if (!map || !network?.nodeIds?.length) return network?.nodeIds || [];
+  const bounds = map.getBounds().pad(0.35);
+  const candidates = network.nodeIds.filter((id) => {
+    const point = network.nodes[id].point;
+    return bounds.contains(point);
+  });
+  return candidates.length >= 24 ? candidates : network.nodeIds;
+}
+
+function buildViewportRoute(network, map, scenarioRuntime, seed = 0) {
+  const candidates = getViewportCandidateNodeIds(map, network);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const startId = candidates[(seed + attempt * 7) % candidates.length];
+    const endId = candidates[(seed * 3 + attempt * 11 + 17) % candidates.length];
+    if (!startId || !endId || startId === endId) continue;
+    const route = findRoute(network, network.nodes[startId].point, network.nodes[endId].point, {
+      blockedEdgeKeys: scenarioRuntime?.blockedEdgeKeys || new Set(),
+    });
+    if (route.length < 2) continue;
+    if (
+      scenarioRuntime &&
+      pathTouchesHazard(route, scenarioRuntime.hazardCenter, scenarioRuntime.hazardRadius * 0.95)
+    ) {
+      continue;
+    }
+    return route;
+  }
+  return buildRandomRoute(network, scenarioRuntime, seed);
+}
+
 function FlyToScenario({ center, zoom }) {
   const map = useMap();
   useEffect(() => {
@@ -500,7 +545,7 @@ function getPointOnRoute(routeData, index, progress) {
   return interpolate(from, to, progress);
 }
 
-function pointRouteDistance(point, routeData) {
+function _pointRouteDistance(point, routeData) {
   if (!routeData) return Infinity;
   let best = Infinity;
   for (let i = 0; i < routeData.points.length; i += 1) {
@@ -519,14 +564,14 @@ function remainingRouteTouchesHazard(vehicle, scenarioRuntime) {
   return pathTouchesHazard(remainingPoints, scenarioRuntime.hazardCenter, scenarioRuntime.hazardRadius);
 }
 
-function createAmbientVehicle(network, variant = 0) {
+function createAmbientVehicle(network, map, scenarioRuntime, variant = 0) {
   const typeRoll = Math.random();
   let type = 'civilian_car';
   if (typeRoll > 0.992) type = 'ambulance';
   else if (typeRoll > 0.984) type = 'fire_truck';
   else if (typeRoll > 0.974) type = 'police';
 
-  let routePoints = buildRandomRoute(network, null, variant);
+  let routePoints = buildViewportRoute(network, map, scenarioRuntime, variant);
   if (!routePoints || routePoints.length < 2) {
     const node = network.nodes[network.nodeIds[variant % network.nodeIds.length]];
     routePoints = [node.point, node.point];
@@ -560,10 +605,10 @@ function createAmbientVehicle(network, variant = 0) {
     currentSpeed: 0,
     baseSpeed:
       type === 'civilian_car'
-        ? 10 + Math.random() * 6
-        : 13 + VEHICLE_TYPES[type].speed * 6,
-    width: type === 'civilian_car' ? 3.2 : 4.2,
-    length: type === 'civilian_car' ? 6.5 : 8.5,
+        ? 9 + Math.random() * 5
+        : 12 + VEHICLE_TYPES[type].speed * 5,
+    width: type === 'civilian_car' ? 4.6 : 5.8,
+    length: type === 'civilian_car' ? 9.5 : 12.5,
     reroutedScenarioToken: null,
     completed: false,
   };
@@ -585,8 +630,8 @@ function createDispatchVehicle(definition, routeData, token, index) {
     lastPosition: startPoint,
     currentSpeed: 0,
     baseSpeed: 16 + (VEHICLE_TYPES[type]?.speed || 1) * 8,
-    width: 4.5,
-    length: type === 'supply' ? 10 : 8,
+    width: 6,
+    length: type === 'supply' ? 14 : 11,
     reroutedScenarioToken: token,
     completed: false,
     dispatchDelayMs: index * 360,
@@ -663,8 +708,8 @@ function drawVehicle(ctx, map, vehicle, now) {
   ctx.translate(point.x, point.y);
   ctx.rotate(angle || 0);
 
-  ctx.fillStyle = 'rgba(0,0,0,0.32)';
-  ctx.fillRect(-vehicle.length / 2 + 1, -vehicle.width / 2 + 1, vehicle.length, vehicle.width);
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(-vehicle.length / 2 + 2, -vehicle.width / 2 + 2, vehicle.length, vehicle.width);
 
   if (vehicle.type === 'ambulance') {
     ctx.fillStyle = '#ffffff';
@@ -673,7 +718,9 @@ function drawVehicle(ctx, map, vehicle, now) {
     ctx.fillRect(-1, -vehicle.width / 2 + 0.4, 2, vehicle.width - 0.8);
     ctx.fillRect(-vehicle.length / 4, -1, vehicle.length / 2, 2);
     ctx.fillStyle = now % 320 > 160 ? '#ef4444' : '#2563eb';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 10;
     ctx.fillRect(-1.4, -vehicle.width / 2 - 0.9, 2.8, 1.4);
+    ctx.shadowBlur = 0;
   } else if (vehicle.type === 'fire_truck') {
     ctx.fillStyle = '#dc2626';
     ctx.fillRect(-vehicle.length / 2, -vehicle.width / 2, vehicle.length, vehicle.width);
@@ -683,24 +730,67 @@ function drawVehicle(ctx, map, vehicle, now) {
     ctx.fillStyle = '#0f172a';
     ctx.fillRect(-vehicle.length / 2, -vehicle.width / 2, vehicle.length, vehicle.width);
     ctx.fillStyle = now % 300 > 150 ? '#2563eb' : '#ffffff';
-    ctx.fillRect(-vehicle.length / 4, -vehicle.width / 2 - 0.6, vehicle.length / 2, 1.1);
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 8;
+    ctx.fillRect(-vehicle.length / 4, -vehicle.width / 2 - 0.6, vehicle.length / 2, 1.4);
+    ctx.shadowBlur = 0;
   } else if (vehicle.type === 'supply') {
     ctx.fillStyle = '#166534';
     ctx.fillRect(-vehicle.length / 2, -vehicle.width / 2, vehicle.length, vehicle.width);
     ctx.fillStyle = 'rgba(255,255,255,0.88)';
     ctx.fillRect(-vehicle.length / 4, -vehicle.width / 2 + 0.7, vehicle.length / 2, vehicle.width - 1.4);
   } else {
-    const palette = ['#cbd5e1', '#334155', '#3b82f6', '#22c55e', '#f59e0b', '#ef4444'];
+    const palette = ['#e0e0e0', '#2a2a2a', '#d32f2f', '#1976d2', '#388e3c', '#ff9800'];
     ctx.fillStyle = palette[vehicle.variant % palette.length];
     ctx.fillRect(-vehicle.length / 2, -vehicle.width / 2, vehicle.length, vehicle.width);
-    ctx.fillStyle = 'rgba(0,0,0,0.28)';
-    ctx.fillRect(-vehicle.length / 4, -vehicle.width / 2 + 0.5, vehicle.length / 2, vehicle.width - 1);
+    
+    // Windows
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(-vehicle.length / 4, -vehicle.width / 2 + 1, vehicle.length / 2, vehicle.width - 2);
+
+    // Headlights
+    ctx.fillStyle = '#ffffcc';
+    ctx.fillRect(vehicle.length / 2 - 2, -vehicle.width / 2 + 0.5, 2, 1);
+    ctx.fillRect(vehicle.length / 2 - 2, vehicle.width / 2 - 1.5, 2, 1);
+
+    // Braking / tail lights
+    if (vehicle.currentSpeed < 4) {
+      ctx.fillStyle = '#ff1111';
+      ctx.shadowColor = '#ff1111'; ctx.shadowBlur = 8;
+      ctx.fillRect(-vehicle.length / 2, -vehicle.width / 2 + 0.5, 2, 1.5);
+      ctx.fillRect(-vehicle.length / 2, vehicle.width / 2 - 2, 2, 1.5);
+      ctx.shadowBlur = 0;
+    } else {
+      ctx.fillStyle = '#aa0000';
+      ctx.fillRect(-vehicle.length / 2, -vehicle.width / 2 + 0.5, 1, 1.5);
+      ctx.fillRect(-vehicle.length / 2, vehicle.width / 2 - 2, 1, 1.5);
+    }
   }
 
   if (vehicle.role === 'dispatch') {
-    ctx.strokeStyle = `${def.color}aa`;
-    ctx.lineWidth = 1;
-    ctx.strokeRect(-vehicle.length / 2 - 1.2, -vehicle.width / 2 - 1.2, vehicle.length + 2.4, vehicle.width + 2.4);
+    ctx.save();
+    const bounce = Math.sin(now / 150) * 8;
+    ctx.translate(0, -25 + bounce);
+    ctx.rotate(-angle); // Keep arrow upright relative to screen
+
+    ctx.shadowColor = '#000'; ctx.shadowBlur = 8;
+    ctx.fillStyle = vehicle.type === 'ambulance' ? '#ef4444' : def.color;
+    ctx.beginPath();
+    ctx.moveTo(0, 8);
+    ctx.lineTo(-6, 0);
+    ctx.lineTo(-2, 0);
+    ctx.lineTo(-2, -10);
+    ctx.lineTo(2, -10);
+    ctx.lineTo(2, 0);
+    ctx.lineTo(6, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('SOS', 0, -15);
+    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 
   ctx.restore();
@@ -736,14 +826,16 @@ function CanvasTrafficLayer({ network, scenarioRuntime, scenarioToken, dispatchW
     resize();
     map.on('resize zoom move', resize);
 
-    ambientRef.current = Array.from({ length: 180 }, (_, index) => createAmbientVehicle(network, index));
+    ambientRef.current = Array.from({ length: AMBIENT_VEHICLE_LIMIT }, (_, index) =>
+      createAmbientVehicle(network, map, scenarioRuntime, index),
+    );
 
     return () => {
       map.off('resize zoom move', resize);
       if (canvas.parentNode) canvas.parentNode.removeChild(canvas);
       canvasRef.current = null;
     };
-  }, [map, network]);
+  }, [map, network, scenarioRuntime]);
 
   useEffect(() => {
     if (!dispatchWave?.vehicles?.length || !scenarioRuntime) return;
@@ -769,7 +861,7 @@ function CanvasTrafficLayer({ network, scenarioRuntime, scenarioToken, dispatchW
       ambientRef.current.forEach((vehicle) => {
         const arrived = advanceVehicle(vehicle, dt, network, scenarioRuntime, scenarioToken);
         if (arrived) {
-          Object.assign(vehicle, createAmbientVehicle(network, vehicle.variant));
+          Object.assign(vehicle, createAmbientVehicle(network, map, scenarioRuntime, vehicle.variant));
           return;
         }
         drawVehicle(ctx, map, vehicle, timestamp);
@@ -817,7 +909,6 @@ function DisasterAnimation({ scenario }) {
     iconAnchor: [14, 14],
   });
 
-  const innerRadius = Math.max(120, scenario.hazardRadius * 0.42);
   return (
     <>
       <style>{`
@@ -825,28 +916,15 @@ function DisasterAnimation({ scenario }) {
           0%, 100% { transform: scale(1); opacity: 0.92; }
           50% { transform: scale(1.14); opacity: 1; }
         }
+        .blocked-road-glow {
+          animation: road-pulse 1.5s infinite alternate;
+          stroke-linecap: round;
+        }
+        @keyframes road-pulse {
+          0% { filter: drop-shadow(0 0 6px #ff1111); stroke: #ff1111; opacity: 1; }
+          100% { filter: drop-shadow(0 0 20px #ff0000); stroke: #ff4444; opacity: 0.85; }
+        }
       `}</style>
-      {scenario.id === 'flood' && (
-        <>
-          <Circle
-            center={scenario.hazardCenter}
-            radius={scenario.hazardRadius}
-            pathOptions={{ color: '#38bdf8', weight: 2, fillColor: '#38bdf8', fillOpacity: 0.14, dashArray: '12 10' }}
-          />
-          <Circle
-            center={scenario.hazardCenter}
-            radius={innerRadius}
-            pathOptions={{ color: '#7dd3fc', weight: 1.5, fillColor: '#0ea5e9', fillOpacity: 0.22 }}
-          />
-        </>
-      )}
-      {scenario.id !== 'flood' && (
-        <Circle
-          center={scenario.hazardCenter}
-          radius={scenario.hazardRadius}
-          pathOptions={{ color: scenario.color, weight: 2, fillColor: scenario.color, fillOpacity: 0.1, dashArray: '10 8' }}
-        />
-      )}
       <Marker position={scenario.hazardCenter} icon={hazardIcon} zIndexOffset={900} />
     </>
   );
@@ -885,20 +963,23 @@ export function SimulationOverlay({ scenario, vehicles, running, onPhaseChange, 
 
   useEffect(() => {
     if (!running || !scenarioRuntime) {
-      setPhase('idle');
-      setDispatchWave(null);
-      setArrivals(0);
-      setScenarioToken('ambient');
-      return undefined;
+      const resetTimer = setTimeout(() => {
+        setPhase('idle');
+        setDispatchWave(null);
+        setArrivals(0);
+        setScenarioToken('ambient');
+      }, 0);
+      return () => clearTimeout(resetTimer);
     }
 
-    setArrivals(0);
     const nextToken = `${scenarioRuntime.id}-${Date.now()}`;
-    setScenarioToken(nextToken);
-    setPhase('blocked');
-    onPhaseChange?.('blocked');
-
     const routeVehicles = vehicles.map((vehicle, index) => ({ ...vehicle, key: `${vehicle.type}-${index}`, variant: index }));
+    const bootTimer = setTimeout(() => {
+      setArrivals(0);
+      setScenarioToken(nextToken);
+      setPhase('blocked');
+      onPhaseChange?.('blocked');
+    }, 0);
 
     const rerouteTimer = setTimeout(() => {
       setPhase('rerouting');
@@ -912,6 +993,7 @@ export function SimulationOverlay({ scenario, vehicles, running, onPhaseChange, 
     }, 2600);
 
     return () => {
+      clearTimeout(bootTimer);
       clearTimeout(rerouteTimer);
       clearTimeout(launchTimer);
     };
@@ -919,15 +1001,38 @@ export function SimulationOverlay({ scenario, vehicles, running, onPhaseChange, 
 
   useEffect(() => {
     if (!dispatchWave?.vehicles?.length || arrivals < dispatchWave.vehicles.length) return;
-    setPhase('arrived');
-    onPhaseChange?.('arrived');
+    const completeTimer = setTimeout(() => {
+      setPhase('arrived');
+      onPhaseChange?.('arrived');
+    }, 0);
+    return () => clearTimeout(completeTimer);
   }, [arrivals, dispatchWave, onPhaseChange]);
 
   if (!roadNetwork.nodeIds.length) return null;
 
+  const renderTrafficCongestion = () => {
+    return tmLines?.map((line, idx) => {
+      if (!line.positions || line.positions.length < 2) return null;
+      let color = '#22c55e'; // Green - Normal
+      let weight = 3;
+      let opacity = 0.35;
+      if (line.cng === 'H') { color = '#ef4444'; weight = 4.5; opacity = 0.7; } // Red - Heavy
+      else if (line.cng === 'M') { color = '#eab308'; weight = 4; opacity = 0.6; } // Yellow - Medium
+      
+      return (
+        <Polyline
+          key={`cng-${idx}`}
+          positions={line.positions}
+          pathOptions={{ color, weight, opacity, lineCap: 'round', lineJoin: 'round' }}
+        />
+      );
+    });
+  };
+
   if (!scenarioRuntime) {
     return (
       <>
+        {renderTrafficCongestion()}
         <CanvasTrafficLayer network={roadNetwork} scenarioRuntime={null} scenarioToken="ambient" dispatchWave={null} />
       </>
     );
@@ -935,6 +1040,7 @@ export function SimulationOverlay({ scenario, vehicles, running, onPhaseChange, 
 
   return (
     <>
+      {renderTrafficCongestion()}
       <CanvasTrafficLayer
         network={roadNetwork}
         scenarioRuntime={running ? scenarioRuntime : null}
@@ -949,11 +1055,7 @@ export function SimulationOverlay({ scenario, vehicles, running, onPhaseChange, 
         <React.Fragment key={`blocked-segment-${index}`}>
           <Polyline
             positions={segment.positions}
-            pathOptions={{ color: '#ef4444', weight: 10, opacity: 0.92, lineCap: 'round', lineJoin: 'round' }}
-          />
-          <Polyline
-            positions={segment.positions}
-            pathOptions={{ color: '#fff', weight: 2, opacity: 0.65, dashArray: '8 10' }}
+            pathOptions={{ className: 'blocked-road-glow', color: '#ff1111', weight: 12, lineCap: 'round', lineJoin: 'round' }}
           />
         </React.Fragment>
       ))}
@@ -988,7 +1090,6 @@ export function SimulationOverlay({ scenario, vehicles, running, onPhaseChange, 
 
 export default function EmergencySimPanel({ onSimChange }) {
   const [activeScenario, setActiveScenario] = useState(null);
-  const [selectedVehicles, setSelectedVehicles] = useState(['ambulance', 'fire_truck']);
   const [running, setRunning] = useState(false);
   const [phase, setPhase] = useState('idle');
   const [collapsed, setCollapsed] = useState(false);
@@ -1003,21 +1104,16 @@ export default function EmergencySimPanel({ onSimChange }) {
     }
   }, []);
 
-  const toggleVehicle = (type) => {
-    setSelectedVehicles((current) =>
-      current.includes(type) ? current.filter((value) => value !== type) : [...current, type],
-    );
-  };
+
 
   const handleRun = () => {
-    if (!activeScenario || selectedVehicles.length === 0) return;
+    if (!activeScenario) return;
     setRunning(false);
     setPhase('idle');
     setTimeout(() => {
       setRunning(true);
       onSimChange?.({
         scenario: activeScenario,
-        vehicles: selectedVehicles.map((type) => ({ type })),
         running: true,
         onPhaseChange: handlePhaseChange,
       });
@@ -1027,7 +1123,7 @@ export default function EmergencySimPanel({ onSimChange }) {
   const handleStop = () => {
     setRunning(false);
     setPhase('idle');
-    onSimChange?.({ scenario: null, vehicles: [], running: false });
+    onSimChange?.({ scenario: null, running: false });
   };
 
   const PHASE_LABELS = {
@@ -1087,33 +1183,8 @@ export default function EmergencySimPanel({ onSimChange }) {
 
           {activeScenario && <p className="sim-sc-desc">{SCENARIOS[activeScenario].description}</p>}
 
-          <div className="sim-section-label" style={{ marginTop: '0.6rem' }}>
-            Dispatch Vehicles
-          </div>
-          <div className="sim-vehicles">
-            {Object.entries(VEHICLE_TYPES)
-              .filter(([type]) => type !== 'civilian_car')
-              .map(([type, definition]) => (
-                <button
-                  key={type}
-                  className={`sim-vehicle-btn ${selectedVehicles.includes(type) ? 'active' : ''}`}
-                  style={
-                    selectedVehicles.includes(type)
-                      ? { borderColor: definition.color, color: definition.color, background: `${definition.color}18` }
-                      : {}
-                  }
-                  onClick={() => {
-                    if (!running) toggleVehicle(type);
-                  }}
-                >
-                  <span>{definition.icon}</span>
-                  <span className="sim-vehicle-label">{definition.label}</span>
-                </button>
-              ))}
-          </div>
-
           <div className="sim-controls">
-            <button className="sim-run-btn" onClick={handleRun} disabled={running || !activeScenario || selectedVehicles.length === 0}>
+            <button className="sim-run-btn" onClick={handleRun} disabled={running || !activeScenario}>
               <svg width="11" height="11" viewBox="0 0 24 24" fill="white">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>

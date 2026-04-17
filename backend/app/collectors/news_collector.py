@@ -42,7 +42,7 @@ async def fetch_disaster_news(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(NEWS_API_URL, params=params)
             response.raise_for_status()
             data = response.json()
@@ -98,7 +98,7 @@ async def fetch_weather_alerts(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(NWS_ALERTS_URL, params=params, headers=headers)
             response.raise_for_status()
             data = response.json()

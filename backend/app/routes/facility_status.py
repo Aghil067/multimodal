@@ -198,20 +198,23 @@ def analyze_text_for_impact(text: str, facility_name: str = "") -> dict:
     Analyze a text (news/social) for disaster/closure keywords
     that might affect a facility.
     Returns {"impacted": bool, "impact_type": str, "severity": float, "reason": str}
+    
+    IMPORTANT: Only mark as impacted if facility name is explicitly mentioned!
+    This prevents false positives from regional disasters.
     """
     text_lower = text.lower()
     facility_lower = facility_name.lower() if facility_name else ""
+    
+    # STRICT: Only trigger if facility name is mentioned in the text
+    if not facility_lower or facility_lower not in text_lower:
+        return {"impacted": False}
     
     best_match = None
     best_severity = 0
     
     for keyword, info in CLOSURE_KEYWORDS.items():
         if keyword in text_lower:
-            # Boost severity if facility name also appears in text
             sev = info["severity"]
-            if facility_lower and facility_lower in text_lower:
-                sev = min(1.0, sev + 0.15)
-            
             if sev > best_severity:
                 best_severity = sev
                 best_match = {
@@ -253,23 +256,37 @@ async def analyze_facility_status(
     """
     type_list = types.split(",") if types else ["grocery", "fuel_station", "hospital"]
     
-    # Parallel data collection
-    (
-        infrastructure,
-        social_raw,
-        news_articles,
-        weather_alerts,
-        tm_incidents,
-        tm_weather,
-    ) = await asyncio.gather(
-        fetch_chicago_infrastructure(types=type_list),
-        fetch_reddit_posts(limit=50),
-        fetch_disaster_news(),
-        fetch_weather_alerts(),
-        fetch_travelmidwest_incidents(),
-        fetch_travelmidwest_weather(),
-        return_exceptions=True,
-    )
+    # Parallel data collection with timeout to prevent hanging
+    try:
+        (
+            infrastructure,
+            social_raw,
+            news_articles,
+            weather_alerts,
+            tm_incidents,
+            tm_weather,
+        ) = await asyncio.wait_for(
+            asyncio.gather(
+                fetch_chicago_infrastructure(types=type_list),
+                fetch_reddit_posts(limit=50),
+                fetch_disaster_news(),
+                fetch_weather_alerts(),
+                fetch_travelmidwest_incidents(),
+                fetch_travelmidwest_weather(),
+                return_exceptions=True,
+            ),
+            timeout=20.0  # Keep facility analysis responsive when upstream APIs are slow
+        )
+    except asyncio.TimeoutError:
+        from app.collectors.osm_infrastructure import get_fallback_infrastructure
+
+        logger.warning("Facility status analysis timed out after 20s. Using fallback infrastructure.")
+        infrastructure = get_fallback_infrastructure()
+        social_raw = []
+        news_articles = []
+        weather_alerts = []
+        tm_incidents = {"features": []}
+        tm_weather = {"features": []}
     
     # Handle exceptions
     def safe(val, default):
@@ -354,41 +371,31 @@ async def analyze_facility_status(
         # ── 2. Nearby text signal analysis ──
         impacts = []
         
-        # News
+        # News - only if facility is mentioned OR disaster is VERY severe
         for signal in all_text_signals:
             impact = analyze_text_for_impact(signal["text"], f_name)
             if impact["impacted"]:
-                impacts.append({
-                    **impact,
-                    "source": signal["source"],
-                    "text_snippet": signal["text"][:120],
-                })
+                # Only add if facility name mentioned in the disaster text
+                # This prevents marking all facilities for a distant disaster
+                if f_name.lower() in signal["text"].lower() or impact["severity"] >= 0.95:
+                    impacts.append({
+                        **impact,
+                        "source": signal["source"],
+                        "text_snippet": signal["text"][:120],
+                    })
         
-        # ── 3. Weather alerts ──
-        weather_impact = None
-        for alert in weather_alerts:
-            # Weather alerts are regional; check if Chicago-relevant
-            severity_map = {"critical": 0.9, "high": 0.7, "medium": 0.5, "low": 0.3}
-            sev = severity_map.get(alert.get("severity", "low"), 0.3)
-            if sev >= 0.5:
-                weather_impact = {
-                    "impacted": True,
-                    "impact_type": "weather_alert",
-                    "severity": sev,
-                    "reason": alert.get("event", "Weather alert"),
-                    "source": "nws",
-                }
-                impacts.append(weather_impact)
+        # ── 3. Weather alerts (disabled - weather alone doesn't impact facility status) ──
+        # Only explicit facility mentions trigger impact status
         
-        # ── 4. Nearby TM incidents ──
+        # ── 4. Nearby TM incidents (only if very close AND blocking) ──
         for inc in tm_incident_points:
             dist = haversine_km(f_lat, f_lng, inc["lat"], inc["lng"])
-            if dist <= radius_km:
-                sev = 0.7 if inc["severity"] == "full" else 0.5
+            # Only mark impacted if within 500m AND full closure
+            if dist <= 0.5 and inc["severity"] == "full":
                 impacts.append({
                     "impacted": True,
                     "impact_type": "traffic_incident",
-                    "severity": sev,
+                    "severity": 0.5,  # Moderate impact - traffic incident alone is not critical
                     "reason": f"Traffic incident {dist:.1f}km away: {inc['desc'][:80]}",
                     "source": "travelmidwest",
                 })
@@ -401,31 +408,24 @@ async def analyze_facility_status(
         max_severity = impacts[0]["severity"] if impacts else 0
         primary_impact = impacts[0] if impacts else None
         
-        if max_severity >= 0.85:
+        # STRICT CONSERVATIVE LOGIC: Only mark CLOSED if critical evidence
+        # Most facilities should be OPEN by default
+        if max_severity >= 0.95:
             status = "CLOSED"
-            status_reason = f"Likely closed due to: {IMPACT_DESCRIPTIONS.get(primary_impact['impact_type'], 'disaster impact')}"
-        elif max_severity >= 0.6:
+            status_reason = f"Confirmed closed: {IMPACT_DESCRIPTIONS.get(primary_impact['impact_type'], 'disaster impact')}"
+        elif max_severity >= 0.75:
             status = "IMPACTED"
             status_reason = f"Operations impacted: {IMPACT_DESCRIPTIONS.get(primary_impact['impact_type'], 'disruption')}"
-        elif max_severity >= 0.4:
+        elif max_severity >= 0.5:
             status = "AT_RISK"
             status_reason = f"At risk: {IMPACT_DESCRIPTIONS.get(primary_impact['impact_type'], 'nearby disruption')}"
-        elif hours_info["is_open"] is False:
-            status = "CLOSED"
-            status_reason = f"Currently outside operating hours ({hours_info['schedule']})"
-        elif hours_info["is_open"] is True:
+        else:
+            # DEFAULT: Most facilities are OPEN
             status = "OPEN"
             status_reason = "Operating normally"
-        else:
-            status = "UNKNOWN"
-            status_reason = "Unable to determine status"
         
-        # Compute an overall confidence
-        confidence = hours_info["confidence"]
-        if impacts:
-            # Boost confidence if multiple signals corroborate
-            signal_count = len(set(i["source"] for i in impacts if i.get("source")))
-            confidence = min(1.0, 0.5 + signal_count * 0.15 + max_severity * 0.2)
+        # Confidence: high when no impacts detected
+        confidence = 0.85 if not impacts else min(1.0, 0.5 + len(impacts) * 0.1 + max_severity * 0.15)
         
         facility_statuses.append({
             "osm_id": facility.get("osm_id"),
@@ -486,3 +486,73 @@ async def analyze_facility_status(
         },
         "analyzed_at": now.isoformat(),
     }
+
+
+# Helper function for AI summary to get infrastructure impact
+async def get_infrastructure_impact() -> Dict[str, Any]:
+    """
+    Quick facility status summary for AI situational intelligence.
+    Returns critical impact metrics for supply chain analysis.
+    """
+    try:
+        result = await analyze_facility_status(types="grocery,fuel_station,hospital")
+        
+        facilities = result.get("facilities", [])
+        summary = result.get("summary", {})
+        status_counts = summary.get("status_counts", {})
+        
+        # Count critical facilities (CLOSED or IMPACTED)
+        closed_count = status_counts.get("CLOSED", 0)
+        impacted_count = status_counts.get("IMPACTED", 0)
+        at_risk_count = status_counts.get("AT_RISK", 0)
+        open_count = status_counts.get("OPEN", 0)
+        
+        total_facilities = len(facilities)
+        critical_facilities = closed_count + impacted_count
+        
+        # Break down by facility type
+        type_breakdown = summary.get("by_type", {})
+        grocery_impact = type_breakdown.get("grocery", {})
+        fuel_impact = type_breakdown.get("fuel_station", {})
+        hospital_impact = type_breakdown.get("hospital", {})
+        
+        return {
+            "critical_facilities_impacted": critical_facilities,
+            "closed_facilities": closed_count,
+            "impacted_facilities": impacted_count,
+            "at_risk_facilities": at_risk_count,
+            "open_facilities": open_count,
+            "total_facilities": total_facilities,
+            "impact_percentage": (critical_facilities / total_facilities * 100) if total_facilities > 0 else 0,
+            "status_breakdown": status_counts,
+            "type_breakdown": {
+                "grocery": grocery_impact,
+                "fuel_station": fuel_impact,
+                "hospital": hospital_impact,
+            },
+            "impacted_facilities_list": [
+                {
+                    "name": f["name"],
+                    "type": f["type"],
+                    "status": f["status"],
+                    "latitude": f.get("latitude"),
+                    "longitude": f.get("longitude"),
+                }
+                for f in facilities
+                if f["status"] in ("CLOSED", "IMPACTED", "AT_RISK")
+            ][:10],  # Top 10 impacted facilities
+        }
+    except Exception as e:
+        logger.error(f"Error getting infrastructure impact: {e}")
+        return {
+            "critical_facilities_impacted": 0,
+            "closed_facilities": 0,
+            "impacted_facilities": 0,
+            "at_risk_facilities": 0,
+            "open_facilities": 0,
+            "total_facilities": 0,
+            "impact_percentage": 0,
+            "status_breakdown": {},
+            "type_breakdown": {},
+            "impacted_facilities_list": []
+        }

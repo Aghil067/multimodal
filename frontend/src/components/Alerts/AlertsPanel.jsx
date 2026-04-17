@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Fuel, ShoppingCart, Waves, Zap, Ban, AlertCircle, CloudLightning, Newspaper, MapPin, Check } from 'lucide-react';
 
 const SEVERITY_COLORS = {
   critical: { color: '#f43f5e', bg: 'rgba(244,63,94,0.12)', border: 'rgba(244,63,94,0.3)', pulse: true },
@@ -8,16 +9,16 @@ const SEVERITY_COLORS = {
 };
 
 const TYPE_ICONS = {
-  fuel_shortage: '⛽',
-  grocery_shortage: '🛒',
-  road_blocked: '🚧',
-  flooding: '🌊',
-  panic_buying: '⚡',
-  power_outage: '⚡',
-  inaccessible_location: '🚫',
-  general_disruption: '◆',
-  weather: '⛈',
-  news: '📰',
+  fuel_shortage: <Fuel size={14} />,
+  grocery_shortage: <ShoppingCart size={14} />,
+  road_blocked: <Ban size={14} />,
+  flooding: <Waves size={14} />,
+  panic_buying: <Zap size={14} />,
+  power_outage: <Zap size={14} />,
+  inaccessible_location: <Ban size={14} />,
+  general_disruption: <AlertCircle size={14} />,
+  weather: <CloudLightning size={14} />,
+  news: <Newspaper size={14} />,
 };
 
 const SEVERITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -146,8 +147,8 @@ export default function AlertsPanel({ alerts = [], disruptions = [], onAlertClic
               >
                 <div className="alert-card-header">
                   <div className="alert-type-icon-wrap" style={{ background: cfg.bg }}>
-                    <span className="alert-type-icon">
-                      {TYPE_ICONS[item.disruption_type] || TYPE_ICONS[item.type] || '◆'}
+                    <span className="alert-type-icon flex items-center justify-center">
+                      {TYPE_ICONS[item.disruption_type] || TYPE_ICONS[item.type] || <AlertCircle size={14} />}
                     </span>
                   </div>
                   <div className="alert-info">
@@ -197,11 +198,11 @@ export default function AlertsPanel({ alerts = [], disruptions = [], onAlertClic
                     <div className="alert-actions">
                       {item.latitude && item.longitude && (
                         <button className="alert-action-btn btn-view" onClick={(e) => { e.stopPropagation(); onAlertClick(item); }}>
-                          <span>📍</span> View on Map
+                          <MapPin size={14} className="inline-icon" /> View on Map
                         </button>
                       )}
                       <button className="alert-action-btn btn-resolve" onClick={(e) => markResolved(item, e)}>
-                        <span>✓</span> Mark Resolved
+                        <Check size={14} className="inline-icon" /> Mark Resolved
                       </button>
                     </div>
                   </div>

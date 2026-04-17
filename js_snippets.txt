@@ -1,8 +1,0 @@
-olor Blind Mode":"Standard Color Mode",onClick:()=>n(e=>!e),children:t?(0,T.jsx)(ae.A,{}):(0,T.jsx)(oe.A,{})})}const ce={name:"Congestion",endpoint:"/congestionMap.json",showOnMap:!0,polylineLayer:!0,filter:(e,t)=>!(0!==e.properties.id.indexOf("IL-")&&"U"===e.properties.cng),style:(e,t,n)=>({color:ee(e.properties.cng
----
-ldren:(0,T.jsx)(f.A,{colSpan:2,className:"layertablecellRight",children:e.description})},t))})})]})})]})})]})},Yh={name:"Weather Warnings",endpoint:"/weatherMap.json",showOnMap:!0,polygonLayer:!0,PopupTemplate:e=>{const t=e.feature;return(0,T.jsx)(Kh,(0,Q.A)({feature:t},e))},updateDelay:180,mapLayerIcon:"/mapicons
----
-path:"IncidentsReport",component:e=>(0,T.jsx)(Ip,(0,Q.A)({},e))},name:"Incidents",label:"Incidents",title:"Incidents Report",showOnMenu:!0,endpoint:"/incidents.json",get tableColumns(){return Jp()?Xp:ef(Xp)},truckerTableColumns:$p,get cardColumns(){return Jp()?Qp:ef(Qp)},get truckerCardColumns(){return Jp()?Qp:ef
----
-(null),[v,y]=(0,o.useState)({open:!1,title:"",message:""}),b=(0,o.useCallback)(()=>{(async(e,t)=>{try{const n=await fetch("/lmiga/admin/incidentEntry/incidents.json",{method:"GET"});if(n.json().then(t=>{e(t.data)}),!0===n.success?t("Success"):void 0!==n.error&&null!==n.error&&"UNAUTHORIZED"===n.error.code?t("UNAU
----

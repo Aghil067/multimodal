@@ -33,7 +33,7 @@ class Settings:
     CHICAGO_BBOX: dict = {
         "north": 42.023,
         "south": 41.644,
-        "east": -87.524,
+        "east": -87.580,   # tighter eastern edge — excludes Lake Michigan
         "west": -87.940
     }
 

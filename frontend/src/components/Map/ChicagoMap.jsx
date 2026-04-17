@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Polyline, useMap, useMapEvents } from 'react-leaflet';
 import L from 'leaflet';
 import polyline from '@mapbox/polyline';
 import 'leaflet/dist/leaflet.css';
 import { SimulationOverlay } from '../Simulation/EmergencySimulation';
+import { AlertTriangle, CloudSnow, Calendar } from 'lucide-react';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -13,62 +14,36 @@ L.Icon.Default.mergeOptions({
 });
 
 // ---------------------------------------------------------------------------
-// SVG icon builders
+// SVG icon builders - CLEAN & MINIMAL
 // ---------------------------------------------------------------------------
 
-/** Gas Station icon – fuel pump silhouette on orange badge */
+/** Gas Station icon */
 const GAS_STATION_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36">
-  <!-- badge -->
-  <circle cx="18" cy="18" r="17" fill="#f97316" stroke="#fff" stroke-width="2" filter="url(#ds)"/>
-  <defs>
-    <filter id="ds" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.45)"/>
-    </filter>
-  </defs>
-  <!-- fuel pump body -->
-  <rect x="10" y="13" width="10" height="12" rx="1.5" fill="#fff" opacity="0.95"/>
-  <rect x="12" y="15" width="6" height="4" rx="1" fill="#f97316"/>
-  <!-- nozzle arm -->
-  <line x1="20" y1="17" x2="25" y2="14" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
-  <rect x="23" y="12" width="3" height="5" rx="1" fill="#fff" opacity="0.9"/>
-  <!-- pump stand -->
-  <rect x="11" y="25" width="8" height="1.5" rx="0.75" fill="#fff" opacity="0.8"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="14" fill="#f97316" stroke="#fff" stroke-width="2"/>
+  <rect x="11" y="9.5" width="8" height="12" rx="1" fill="#fff"/>
+  <rect x="13" y="11.5" width="4" height="4" rx="0.5" fill="#ef4444"/>
+  <path d="M19 12 h2 v5 h-1" stroke="#fff" stroke-width="1.5" fill="none"/>
+  <rect x="9" y="21.5" width="12" height="1.5" rx="0.5" fill="#fff"/>
 </svg>`.trim();
 
-/** Grocery Store icon – shopping cart on green badge */
+/** Grocery Store icon */
 const GROCERY_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36">
-  <defs>
-    <filter id="ds2" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.45)"/>
-    </filter>
-  </defs>
-  <circle cx="18" cy="18" r="17" fill="#10b981" stroke="#fff" stroke-width="2" filter="url(#ds2)"/>
-  <!-- cart body -->
-  <path d="M9 12 h2.5 l2.5 9 h9 l2-6 H14" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- wheels -->
-  <circle cx="15" cy="23.5" r="1.4" fill="#fff"/>
-  <circle cx="22" cy="23.5" r="1.4" fill="#fff"/>
-  <!-- items in cart (3 dots) -->
-  <circle cx="16.5" cy="18" r="1" fill="#10b981"/>
-  <circle cx="19" cy="18" r="1" fill="#10b981"/>
-  <circle cx="21.5" cy="18" r="1" fill="#10b981"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="14" fill="#10b981" stroke="#fff" stroke-width="2"/>
+  <path d="M10 11.5 L22 11.5 L20 17 L12 17 Z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="M8 9.5 L10 9.5 L10 11.5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="13" cy="20" r="1.5" fill="#fff"/>
+  <circle cx="19" cy="20" r="1.5" fill="#fff"/>
 </svg>`.trim();
 
-/** Hospital icon – red cross on blue badge */
+/** Hospital icon */
 const HOSPITAL_SVG = `
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 36" width="36" height="36">
-  <defs>
-    <filter id="ds3" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="rgba(0,0,0,0.45)"/>
-    </filter>
-  </defs>
-  <circle cx="18" cy="18" r="17" fill="#3b82f6" stroke="#fff" stroke-width="2" filter="url(#ds3)"/>
-  <!-- white cross -->
-  <rect x="15.5" y="10" width="5" height="16" rx="1.5" fill="#fff"/>
-  <rect x="10" y="15.5" width="16" height="5" rx="1.5" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <circle cx="16" cy="16" r="14" fill="#3b82f6" stroke="#fff" stroke-width="2"/>
+  <path d="M16 9.5 L16 22.5 M9.5 16 L22.5 16" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
 </svg>`.trim();
+
 
 /** Disruption markers stay as plain colored circles */
 const createDisruptionIcon = (color, size = 24) =>
@@ -96,14 +71,14 @@ const makeSvgIcon = (svgStr, size = 36) =>
 
 // Pre-build the icons once
 const ICONS = {
-    fuel_station: makeSvgIcon(GAS_STATION_SVG, 36),
-    grocery: makeSvgIcon(GROCERY_SVG, 36),
-    hospital: makeSvgIcon(HOSPITAL_SVG, 36),
-    pharmacy: makeSvgIcon(HOSPITAL_SVG, 30),   // reuse hospital cross for pharmacy
-    disruption_critical: createDisruptionIcon('#f43f5e', 28),
-    disruption_high: createDisruptionIcon('#fb923c', 26),
-    disruption_medium: createDisruptionIcon('#fbbf24', 24),
-    disruption_low: createDisruptionIcon('#34d399', 22),
+    fuel_station: makeSvgIcon(GAS_STATION_SVG, 26),
+    grocery: makeSvgIcon(GROCERY_SVG, 26),
+    hospital: makeSvgIcon(HOSPITAL_SVG, 26),
+    pharmacy: makeSvgIcon(HOSPITAL_SVG, 22),   // reuse hospital cross for pharmacy
+    disruption_critical: createDisruptionIcon('#f43f5e', 24),
+    disruption_high: createDisruptionIcon('#fb923c', 22),
+    disruption_medium: createDisruptionIcon('#fbbf24', 20),
+    disruption_low: createDisruptionIcon('#34d399', 18),
 };
 
 const CONGESTION_COLORS = {
@@ -151,6 +126,20 @@ function MapZoomListener({ onZoom }) {
     useEffect(() => {
         if (map) onZoom(map.getZoom());
     }, [map, onZoom]);
+    return null;
+}
+
+function MapResizer() {
+    const map = useMap();
+    useEffect(() => {
+        const container = map.getContainer();
+        const ro = new window.ResizeObserver(() => {
+            requestAnimationFrame(() => map.invalidateSize());
+        });
+        ro.observe(container);
+        setTimeout(() => map.invalidateSize(), 300);
+        return () => ro.disconnect();
+    }, [map]);
     return null;
 }
 
@@ -275,7 +264,7 @@ export default function ChicagoMap({
     const renderTmLines = () => {
         if (!showTraffic || !tmLineObjects.length) return null;
         const visibleLines = isSimulationTab
-            ? tmLineObjects.filter((line, index) => line.cng === 'H' || line.cng === 'M' || index % 6 === 0)
+            ? tmLineObjects.filter((line, index) => line.cng === 'H' || line.cng === 'M' || index % 2 === 0)
             : tmLineObjects;
         
         // Dynamic weight based on zoom level:
@@ -283,8 +272,8 @@ export default function ChicagoMap({
         // mid zoom (12-13)  -> thin (3)
         // zoomed in (14+)   -> normal (6)
         // maximum zoom      -> prominent (8)
-        const outerWeight = currentZoom >= 15 ? 8 : currentZoom >= 14 ? 6 : currentZoom >= 12 ? 3 : 1.5;
-        const innerWeight = currentZoom >= 15 ? 2 : currentZoom >= 14 ? 1.5 : currentZoom >= 12 ? 1 : 0;
+        const outerWeight = currentZoom >= 15 ? 9 : currentZoom >= 14 ? 7 : currentZoom >= 12 ? 4 : 3;
+        const innerWeight = currentZoom >= 15 ? 2 : currentZoom >= 14 ? 1.5 : currentZoom >= 12 ? 1 : 0.75;
         const dashArray = currentZoom >= 14 ? '8 12' : currentZoom >= 12 ? '4 8' : 'none';
 
         return visibleLines.map((line) => (
@@ -335,12 +324,22 @@ export default function ChicagoMap({
 
 
     // ------------------------------------------------------------------
-    // Travel Midwest Incidents (point markers)
+    // Travel Midwest Incidents (point markers) – ONLY full closures
     // ------------------------------------------------------------------
     const renderTmIncidents = () => {
         if (!showDisruptions || !travelMidwestIncidents || !travelMidwestIncidents.length) return null;
         
-        return travelMidwestIncidents.map((feature, i) => {
+        // Filter to only show full lane closures/blockages
+        const closures = travelMidwestIncidents.filter(feature => {
+            if (!feature || !feature.properties) return false;
+            const props = feature.properties;
+            const isFull = props.lanes === 'full';
+            const isBlocked = (props.closure || '').toLowerCase().includes('blocked') || 
+                             (props.closure || '').toLowerCase().includes('closed');
+            return isFull || isBlocked;
+        });
+        
+        return closures.map((feature, i) => {
             if (!feature || !feature.geometry) return null;
             let coords = null;
             if (feature.geometry.type === 'GeometryCollection' && feature.geometry.geometries) {
@@ -390,15 +389,15 @@ export default function ChicagoMap({
                             <div style={{
                                 background: bgColor, color: '#fff', padding: '4px 10px',
                                 borderRadius: 4, fontWeight: 700, fontSize: '0.85rem',
-                                marginBottom: 8, display: 'inline-block',
+                                marginBottom: 8, display: 'inline-flex', alignItems: 'center', gap: '4px'
                             }}>
-                                ⚠ {typeClass}
+                                <AlertTriangle size={14} /> {typeClass}
                             </div>
                             <div style={{ fontSize: '0.82rem', lineHeight: 1.5 }}>
                                 <div style={{ marginBottom: 4 }}>{locDesc}</div>
                                 {closure && (
                                     <div style={{ color: '#f97316', fontWeight: 600, marginBottom: 2 }}>
-                                        🚧 {closure}
+                                        {closure}
                                     </div>
                                 )}
                                 {start && (
@@ -466,9 +465,9 @@ export default function ChicagoMap({
                                 background: 'linear-gradient(135deg, #0ea5e9, #3b82f6)',
                                 color: '#fff', padding: '4px 10px',
                                 borderRadius: 4, fontWeight: 700, fontSize: '0.85rem',
-                                marginBottom: 8, display: 'inline-block',
+                                marginBottom: 8, display: 'inline-flex', alignItems: 'center', gap: '4px'
                             }}>
-                                ❄ {typeClass}
+                                <CloudSnow size={14} /> {typeClass}
                             </div>
                             <div style={{ fontSize: '0.82rem', lineHeight: 1.5 }}>
                                 {desc}
@@ -536,9 +535,9 @@ export default function ChicagoMap({
                             <div style={{
                                 background: sevColor, color: '#fff', padding: '4px 10px',
                                 borderRadius: 4, fontWeight: 700, fontSize: '0.85rem',
-                                marginBottom: 8, display: 'inline-block',
+                                marginBottom: 8, display: 'inline-flex', alignItems: 'center', gap: '4px'
                             }}>
-                                🚧 Construction – {sev}
+                                <AlertTriangle size={14} /> Construction – {sev}
                             </div>
                             <div style={{ fontSize: '0.82rem', lineHeight: 1.5 }}>
                                 <div style={{ fontWeight: 600, marginBottom: 4 }}>{desc}</div>
@@ -549,8 +548,8 @@ export default function ChicagoMap({
                                     </div>
                                 )}
                                 {time && (
-                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                                        📅 {time}
+                                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                        <Calendar size={12} /> {time}
                                     </div>
                                 )}
                                 {dur && (
@@ -630,61 +629,68 @@ export default function ChicagoMap({
         const statusIcon = STATUS_ICONS[status] || '?';
         const hasStatus = !!statusInfo;
 
-        // Choose base icon based on type
-        let typeEmoji = '🛒';
-        let typeColor = '#10b981';
-        if (baseType === 'fuel_station') { typeEmoji = '⛽'; typeColor = '#f97316'; }
-        else if (baseType === 'hospital') { typeEmoji = '🏥'; typeColor = '#3b82f6'; }
-        else if (baseType === 'pharmacy') { typeEmoji = '💊'; typeColor = '#8b5cf6'; }
+        let baseSvgName = 'grocery';
+        if (baseType === 'fuel_station') baseSvgName = 'fuel_station';
+        if (baseType === 'hospital') baseSvgName = 'hospital';
+        if (baseType === 'pharmacy') baseSvgName = 'pharmacy';
+        
+        let rawSvg = '';
+        if (baseType === 'fuel_station') rawSvg = GAS_STATION_SVG;
+        else if (baseType === 'grocery') rawSvg = GROCERY_SVG;
+        else if (baseType === 'hospital' || baseType === 'pharmacy') rawSvg = HOSPITAL_SVG;
+        else rawSvg = GROCERY_SVG;
 
-        const ringColor = hasStatus ? color : typeColor;
         const glowColor = status === 'CLOSED' ? 'rgba(239,68,68,0.6)' :
                           status === 'IMPACTED' ? 'rgba(249,115,22,0.5)' :
                           status === 'AT_RISK' ? 'rgba(234,179,8,0.4)' : 'none';
+        
         const pulse = (status === 'CLOSED' || status === 'IMPACTED') ? 
             'animation: facility-pulse 2s ease-in-out infinite;' : '';
 
         return L.divIcon({
             className: '',
             html: `<div style="
-                position:relative;width:40px;height:40px;
+                position:relative;width:24px;height:24px;
                 display:flex;align-items:center;justify-content:center;
                 ${pulse}
             ">
-                <div style="
-                    width:36px;height:36px;border-radius:50%;
-                    background:${typeColor};
-                    border:3px solid ${ringColor};
-                    display:flex;align-items:center;justify-content:center;
-                    box-shadow:0 2px 8px rgba(0,0,0,0.5)${glowColor !== 'none' ? `, 0 0 14px ${glowColor}` : ''};
-                    font-size:16px;
-                    position:relative;
-                ">
-                    ${typeEmoji}
-                    ${hasStatus ? `<div style="
-                        position:absolute;bottom:-3px;right:-3px;
-                        width:16px;height:16px;border-radius:50%;
-                        background:${color};border:2px solid #fff;
-                        display:flex;align-items:center;justify-content:center;
-                        font-size:9px;font-weight:bold;color:#fff;
-                        box-shadow:0 1px 4px rgba(0,0,0,0.4);
-                    ">${statusIcon}</div>` : ''}
+                <div style="width:24px;height:24px;box-shadow:0 2px 8px rgba(0,0,0,0.5)${glowColor !== 'none' ? `, 0 0 14px ${glowColor}` : ''};border-radius:50%;">
+                    ${rawSvg}
                 </div>
+                ${hasStatus && status !== 'OPEN' ? `
+                <div style="
+                    position:absolute;bottom:-4px;right:-4px;
+                    width:12px;height:12px;border-radius:50%;
+                    background:${color};border:1.5px solid #fff;
+                    display:flex;align-items:center;justify-content:center;
+                    font-size:8px;font-weight:bold;color:#fff;
+                    box-shadow:0 1px 4px rgba(0,0,0,0.4);
+                ">${statusIcon}</div>` : ''}
             </div>
             <style>
                 @keyframes facility-pulse { 
                     0%,100%{transform:scale(1);} 
-                    50%{transform:scale(1.1);} 
+                    50%{transform:scale(1.15);} 
                 }
             </style>`,
-            iconSize: [40, 40],
-            iconAnchor: [20, 20],
-            popupAnchor: [0, -22],
+            iconSize: [24, 24],
+            iconAnchor: [12, 12],
+            popupAnchor: [0, -12],
         });
     };
 
     return (
         <div className="map-container">
+            {/* Traffic unavailable notice when TravelMidwest is down */}
+            {showTraffic && !isSimulationTab && tmLineObjects.length === 0 && (
+                <div className="tm-unavailable-bar">
+                    <span style={{ fontSize: '0.9rem' }}>⚠</span>
+                    Live traffic lines unavailable (TravelMidwest offline) —
+                    {trafficData.length > 0
+                        ? ` showing ${trafficData.length} Chicago SODA congestion points as fallback`
+                        : ' no fallback data available'}
+                </div>
+            )}
             {/* Live Traffic Status Bar */}
             {tmStats.total > 0 && (
                 <div className="tm-status-bar">
@@ -717,6 +723,7 @@ export default function ChicagoMap({
             )}
 
             <MapContainer center={[41.8781, -87.6298]} zoom={11} className="chicago-map" zoomControl={true} preferCanvas={true}>
+                <MapResizer />
                 <MapZoomListener onZoom={setCurrentZoom} />
                 {/* Dark Tile Layer – optimized for performance */}
                 <TileLayer
@@ -729,22 +736,20 @@ export default function ChicagoMap({
                 />
                 {flyTarget && <FlyToLocation center={flyTarget.center} zoom={flyTarget.zoom} />}
 
-                {/* ── Native traffic congestion paths ── */}
-                {!isSimulationTab && showTraffic && trafficData.map((seg, i) => {
+                {/* ── Native traffic congestion paths (Chicago SODA fallback) ── */}
+                {!isSimulationTab && showTraffic && tmLineObjects.length === 0 && trafficData.map((seg, i) => {
                     if (!seg.latitude || !seg.longitude) return null;
                     const cLevel = seg.congestion_level;
-                    const color = cLevel === 'severe' || cLevel === 'high' ? '#ef4444' : cLevel === 'medium' ? '#fbbf24' : '#22c55e';
-                    // We only have one point per segment in soda... let's mock a short line so it looks like a traffic segment!
-                    // In real app we need line geometries, but drawing a thick dot matching the style:
+                    const color = cLevel === 'severe' ? '#ef4444' : cLevel === 'high' ? '#fb923c' : cLevel === 'medium' ? '#fbbf24' : '#22c55e';
                     return (
-                        <CircleMarker key={`t-${i}`} center={[seg.latitude, seg.longitude]} radius={6}
-                            fillColor={color} fillOpacity={1} stroke={false} className="canvas-street-dot">
+                        <CircleMarker key={`t-${i}`} center={[seg.latitude, seg.longitude]} radius={5}
+                            fillColor={color} fillOpacity={0.85} color={color} weight={1} opacity={0.5}
+                            className="canvas-street-dot">
                             <Popup>
                                 <div className="popup-content">
                                     <strong>{seg.street || 'Segment'}</strong><br />
                                     Speed: {seg.current_speed?.toFixed(1)} mph<br />
-                                    Congestion: <b>
-                                        {seg.congestion_level?.toUpperCase()}</b>
+                                    Congestion: <b>{seg.congestion_level?.toUpperCase()}</b>
                                 </div>
                             </Popup>
                         </CircleMarker>
@@ -775,7 +780,7 @@ export default function ChicagoMap({
                 )}
 
                 {/* ── Infrastructure markers with Facility Status ── */}
-                {!isSimulationTab && showInfrastructure && currentZoom >= 14 && infrastructure.map((loc, i) => {
+                {!isSimulationTab && showInfrastructure && currentZoom >= 10 && infrastructure.map((loc, i) => {
                     if (!loc.latitude || !loc.longitude) return null;
                     
                     // Look up status
@@ -879,10 +884,15 @@ export default function ChicagoMap({
                     );
                 })}
 
-                {/* ── Disruption markers ── */}
+                {/* ── Disruption markers – ONLY road blockages and critical/high severity ── */}
                 {!isSimulationTab && showDisruptions && disruptions.map((d, i) => {
                     const sev = d.severity_label || 'medium';
-                    return d.latitude && d.longitude && (
+                    const isRoadBlockage = d.disruption_type === 'road_blocked' || d.disruption_type === 'road_closure';
+                    const isCriticalOrHigh = sev === 'critical' || sev === 'high';
+                    // Only show road blockages or critical/high severity disasters
+                    const shouldShow = isRoadBlockage || isCriticalOrHigh;
+                    
+                    return shouldShow && d.latitude && d.longitude && (
                         <Marker key={`d-${i}`} position={[d.latitude, d.longitude]}
                             icon={ICONS[`disruption_${sev}`] || ICONS.disruption_medium}
                             eventHandlers={{ click: () => onLocationClick(d) }}>
@@ -907,7 +917,7 @@ export default function ChicagoMap({
                 <h4>Legend</h4>
 
                 <div className="legend-section">
-                    <span className="legend-title">🚦 Traffic (Live)</span>
+                    <span className="legend-title">Traffic (Live)</span>
                     {[
                         ['#00cc00', 'Free Flow'],
                         ['#cccc00', 'Moderate'],
@@ -949,15 +959,15 @@ export default function ChicagoMap({
                 <div className="legend-section">
                     <span className="legend-title">Facilities</span>
                     <div className="legend-item">
-                        <span className="legend-svg-icon" dangerouslySetInnerHTML={{ __html: GAS_STATION_SVG }} />
+                        <span className="legend-svg-icon" style={{ width: 26, height: 26 }} dangerouslySetInnerHTML={{ __html: GAS_STATION_SVG }} />
                         Gas Station
                     </div>
                     <div className="legend-item">
-                        <span className="legend-svg-icon" dangerouslySetInnerHTML={{ __html: GROCERY_SVG }} />
+                        <span className="legend-svg-icon" style={{ width: 26, height: 26 }} dangerouslySetInnerHTML={{ __html: GROCERY_SVG }} />
                         Grocery Store
                     </div>
                     <div className="legend-item">
-                        <span className="legend-svg-icon" dangerouslySetInnerHTML={{ __html: HOSPITAL_SVG }} />
+                        <span className="legend-svg-icon" style={{ width: 26, height: 26 }} dangerouslySetInnerHTML={{ __html: HOSPITAL_SVG }} />
                         Hospital / Clinic
                     </div>
                 </div>

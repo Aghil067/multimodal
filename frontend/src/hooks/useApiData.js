@@ -22,7 +22,7 @@ export function useApiData(fetchFn, params = [], refreshInterval = null) {
         } finally {
             setLoading(false);
         }
-    }, [fetchFn, ...params]);
+    }, [fetchFn, params]);
 
     useEffect(() => {
         fetchData();

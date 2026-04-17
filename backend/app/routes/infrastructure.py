@@ -21,8 +21,33 @@ async def get_chicago_infrastructure(
     )
 ):
     """Fetch infrastructure locations in Chicago from OpenStreetMap."""
+    import asyncio
+    
     type_list = types.split(",") if types else ["grocery", "fuel_station", "hospital"]
-    locations = await fetch_chicago_infrastructure(types=type_list)
+    
+    locations = []
+    try:
+        # Fetch with sufficient timeout for all mirrors to be tried
+        locations = await asyncio.wait_for(
+            fetch_chicago_infrastructure(types=type_list),
+            timeout=20.0  # Keep map loading fast even when Overpass mirrors are degraded
+        )
+        
+        if locations:
+            print(f"Fetched {len(locations)} REAL infrastructure locations from Overpass API")
+        else:
+            print("Overpass API returned empty. Using demo data.")
+            from app.utils.demo_data import generate_demo_infrastructure
+            locations = generate_demo_infrastructure()
+            
+    except asyncio.TimeoutError:
+        print("Infrastructure fetch timeout. Using demo data.")
+        from app.utils.demo_data import generate_demo_infrastructure
+        locations = generate_demo_infrastructure()
+    except Exception as e:
+        print(f"Infrastructure fetch failed: {str(e)[:100]}. Using demo data.")
+        from app.utils.demo_data import generate_demo_infrastructure
+        locations = generate_demo_infrastructure()
 
     # Update the mapper
     mapper = get_infrastructure_mapper()

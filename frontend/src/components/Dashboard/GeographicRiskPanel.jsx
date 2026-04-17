@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getGeographicClusters } from '../../services/api';
+import { Fuel, ShoppingCart, Activity, Pill, MapPin, Car, AlertTriangle, BarChart2 } from 'lucide-react';
 
 const RISK_CONFIG = {
   critical: { color: '#f43f5e', bg: 'rgba(244,63,94,0.13)', bar: '#f43f5e' },
@@ -9,10 +10,10 @@ const RISK_CONFIG = {
 };
 
 const TYPE_ICONS = {
-  fuel_station: '⛽',
-  grocery: '🛒',
-  hospital: '🏥',
-  pharmacy: '💊',
+  fuel_station: <Fuel size={12} />,
+  grocery: <ShoppingCart size={12} />,
+  hospital: <Activity size={12} />,
+  pharmacy: <Pill size={12} />,
 };
 
 export default function GeographicRiskPanel({ onZoneSelect }) {
@@ -90,17 +91,17 @@ export default function GeographicRiskPanel({ onZoneSelect }) {
                 </span>
               </div>
 
-              <div className="geo-zone-stats">
-                <span>🚗 {zone.traffic_segments} segs</span>
-                <span>⚠ {zone.severe_segments} severe</span>
-                <span>📊 {zone.avg_congestion}% cong</span>
+              <div className="geo-zone-stats flex items-center gap-2">
+                <span className="flex items-center gap-1"><Car size={12} /> {zone.traffic_segments} segs</span>
+                <span className="flex items-center gap-1"><AlertTriangle size={12} /> {zone.severe_segments} severe</span>
+                <span className="flex items-center gap-1"><BarChart2 size={12} /> {zone.avg_congestion}% cong</span>
               </div>
 
               {zone.infrastructure && Object.keys(zone.infrastructure).length > 0 && (
                 <div className="geo-zone-infra">
                   {Object.entries(zone.infrastructure).map(([type, count]) => (
-                    <span key={type} className="geo-infra-chip" title={type}>
-                      {TYPE_ICONS[type] || '📍'} {count}
+                    <span key={type} className="geo-infra-chip flex items-center gap-1" title={type}>
+                      {TYPE_ICONS[type] || <MapPin size={12} />} {count}
                     </span>
                   ))}
                 </div>

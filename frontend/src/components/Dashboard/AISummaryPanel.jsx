@@ -15,9 +15,6 @@ function TypewriterText({ text, speed = 18 }) {
   const timerRef = useRef(null);
 
   useEffect(() => {
-    idx.current = 0;
-    setDisplayed('');
-    setDone(false);
     clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
       idx.current += 1;
@@ -134,6 +131,26 @@ export default function AISummaryPanel({ autoFetch = false }) {
               </div>
             )}
 
+            {data.supply_chain_impact && (
+              <div className="ai-actions" style={{ marginTop: '1rem' }}>
+                <span className="ai-actions-label" style={{ color: '#fb923c', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"></path>
+                  </svg>
+                  Supply Chain Prediction
+                </span>
+                <div className="ai-summary-text" style={{ 
+                  fontSize: '0.85rem', 
+                  color: '#e2e8f0', 
+                  margin: '0.5rem 0 0 0',
+                  lineHeight: '1.4',
+                  whiteSpace: 'pre-line' 
+                }}>
+                  <TypewriterText text={data.supply_chain_impact} speed={8} key={"sc-" + data.generated_at} />
+                </div>
+              </div>
+            )}
+
             {data.data_points && (
               <div className="ai-data-points">
                 {[
@@ -147,6 +164,83 @@ export default function AISummaryPanel({ autoFetch = false }) {
                     <span className="ai-dp-label">{dp.label}</span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {data.infrastructure_impact && (
+              <div className="ai-actions" style={{ marginTop: '1rem' }}>
+                <span className="ai-actions-label" style={{ color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/><path d="M12 2v20M2 12h20"/>
+                  </svg>
+                  Infrastructure Impact
+                </span>
+                
+                <div className="ai-infrastructure-grid" style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: 'repeat(2, 1fr)', 
+                  gap: '0.5rem',
+                  margin: '0.7rem 0',
+                  fontSize: '0.8rem'
+                }}>
+                  <div style={{ background: 'rgba(244,63,94,0.15)', padding: '0.5rem', borderRadius: '4px', borderLeft: '3px solid #f43f5e' }}>
+                    <div style={{ color: '#f43f5e', fontWeight: '700' }}>{data.infrastructure_impact.facilities_closed}</div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>CLOSED</div>
+                  </div>
+                  <div style={{ background: 'rgba(251,146,60,0.15)', padding: '0.5rem', borderRadius: '4px', borderLeft: '3px solid #fb923c' }}>
+                    <div style={{ color: '#fb923c', fontWeight: '700' }}>{data.infrastructure_impact.facilities_impacted}</div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>IMPACTED</div>
+                  </div>
+                  <div style={{ background: 'rgba(251,191,36,0.15)', padding: '0.5rem', borderRadius: '4px', borderLeft: '3px solid #fbbf24' }}>
+                    <div style={{ color: '#fbbf24', fontWeight: '700' }}>{data.infrastructure_impact.facilities_at_risk}</div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>AT RISK</div>
+                  </div>
+                  <div style={{ background: 'rgba(52,211,153,0.15)', padding: '0.5rem', borderRadius: '4px', borderLeft: '3px solid #34d399' }}>
+                    <div style={{ color: '#34d399', fontWeight: '700' }}>{data.infrastructure_impact.facilities_at_risk === undefined ? '?' : (data.infrastructure_impact.total_facilities - data.infrastructure_impact.facilities_closed - data.infrastructure_impact.facilities_impacted - data.infrastructure_impact.facilities_at_risk)}</div>
+                    <div style={{ color: '#94a3b8', fontSize: '0.75rem' }}>OPERATIONAL</div>
+                  </div>
+                </div>
+
+                {data.infrastructure_impact.impact_percentage > 0 && (
+                  <div style={{ 
+                    background: 'rgba(0,0,0,0.2)', 
+                    padding: '0.6rem 0.8rem', 
+                    borderRadius: '4px',
+                    margin: '0.5rem 0',
+                    borderLeft: '3px solid #fb923c'
+                  }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.3rem' }}>Supply Network Disruption</div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#fb923c' }}>
+                      {data.infrastructure_impact.impact_percentage.toFixed(1)}% of facilities affected
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '0.3rem' }}>
+                      Critical resources ({data.infrastructure_impact.type_breakdown?.grocery?.CLOSED || 0} grocery, {data.infrastructure_impact.type_breakdown?.fuel_station?.CLOSED || 0} fuel) compromised
+                    </div>
+                  </div>
+                )}
+
+                {data.infrastructure_impact.impacted_list?.length > 0 && (
+                  <div style={{ marginTop: '0.7rem' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.5rem', fontWeight: '600' }}>Top Impacted Facilities:</div>
+                    <div style={{ maxHeight: '120px', overflowY: 'auto' }}>
+                      {data.infrastructure_impact.impacted_list.slice(0, 5).map((facility, idx) => (
+                        <div key={idx} style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '0.4rem 0.6rem',
+                          background: 'rgba(0,0,0,0.2)',
+                          borderRadius: '3px',
+                          marginBottom: '0.3rem',
+                          borderLeft: facility.status === 'CLOSED' ? '3px solid #f43f5e' : '3px solid #fb923c'
+                        }}>
+                          <div style={{ color: '#e2e8f0', fontWeight: '600' }}>{facility.name}</div>
+                          <div style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                            {facility.type.replace(/_/g, ' ')} • {facility.status}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

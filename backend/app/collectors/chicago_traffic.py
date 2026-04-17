@@ -7,6 +7,7 @@ import httpx
 import logging
 from typing import List, Dict, Any
 from datetime import datetime
+from app.utils.cache import ttl_cache_async
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ def calculate_congestion_level(current_speed: float, free_flow_speed: float) -> 
         return "severe"
 
 
+@ttl_cache_async(ttl_seconds=60, max_entries=16)
 async def fetch_chicago_traffic(limit: int = 1000) -> List[Dict[str, Any]]:
     """
     Fetch real-time traffic congestion data from Chicago's SODA API.
@@ -36,55 +38,81 @@ async def fetch_chicago_traffic(limit: int = 1000) -> List[Dict[str, Any]]:
     """
     params = {
         "$limit": limit,
-        "$order": ":id",
-        "$where": "_current_speed IS NOT NULL"
+        "$order": ":id"
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(CHICAGO_TRAFFIC_URL, params=params)
             response.raise_for_status()
             raw_data = response.json()
 
-        segments = []
-        for record in raw_data:
-            try:
-                current_speed = float(record.get("_current_speed", 0) or 0)
-                free_flow_speed = float(record.get("_traffic", 0) or 0)
+        if not raw_data:
+            logger.debug("Chicago Traffic API returned empty response")
+            return []
 
-                # Extract coordinates from the start point
-                start_lon = record.get("_start_longitude")
-                start_lat = record.get("_start_latitude")
+        logger.debug(f"Chicago Traffic API returned {len(raw_data)} records")
+        
+        segments = []
+        for i, record in enumerate(raw_data):
+            try:
+                # Handle various possible field names from SODA API
+                current_speed = float(record.get("_current_speed") or record.get("current_speed") or 0)
+                free_flow_speed = float(record.get("_traffic") or record.get("traffic") or 0)
+
+                # Extract coordinates - try multiple field name variants
+                start_lat = record.get("_start_latitude") or record.get("start_latitude") or record.get("latitude")
+                start_lon = record.get("_start_longitude") or record.get("start_longitude") or record.get("longitude")
 
                 if not start_lat or not start_lon:
-                    # Try the location field
-                    location = record.get("_location", {})
+                    # Try to parse from location field
+                    location = record.get("_location") or record.get("location")
                     if isinstance(location, dict):
-                        start_lat = location.get("latitude")
-                        start_lon = location.get("longitude")
+                        start_lat = start_lat or location.get("latitude")
+                        start_lon = start_lon or location.get("longitude")
+                    elif isinstance(location, str):
+                        # Sometimes it's a geojson point: {"type": "Point", "coordinates": [lon, lat]}
+                        try:
+                            import json
+                            loc_obj = json.loads(location)
+                            if loc_obj.get("type") == "Point":
+                                start_lon, start_lat = loc_obj.get("coordinates", [None, None])
+                        except:
+                            pass
 
                 if not start_lat or not start_lon:
                     continue
 
+                start_lat = float(start_lat)
+                start_lon = float(start_lon)
+
+                # Skip records outside Chicago area
+                if not (41.6 <= start_lat <= 42.0 and -88.0 <= start_lon <= -87.5):
+                    continue
+
                 segment = {
-                    "segment_id": str(record.get("segmentid", record.get("_segmentid", ""))),
-                    "street": record.get("_street", record.get("street", "Unknown")),
-                    "direction": record.get("_direction", record.get("_fromst", "")),
-                    "from_street": record.get("_fromst", ""),
-                    "to_street": record.get("_tost", ""),
+                    "segment_id": str(record.get("segmentid") or record.get("_segmentid") or record.get("id") or i),
+                    "street": record.get("_street") or record.get("street") or "Unknown",
+                    "direction": record.get("_direction") or record.get("direction") or record.get("_fromst") or "",
+                    "from_street": record.get("_fromst") or record.get("from_street") or "",
+                    "to_street": record.get("_tost") or record.get("to_street") or "",
                     "current_speed": current_speed,
                     "free_flow_speed": free_flow_speed,
                     "congestion_level": calculate_congestion_level(current_speed, free_flow_speed),
-                    "latitude": float(start_lat),
-                    "longitude": float(start_lon),
+                    "latitude": start_lat,
+                    "longitude": start_lon,
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 segments.append(segment)
             except (ValueError, TypeError, KeyError) as e:
-                logger.debug(f"Skipping malformed traffic record: {e}")
+                logger.debug(f"Skipping malformed traffic record {i}: {e}")
                 continue
 
-        logger.info(f"Fetched {len(segments)} traffic segments from Chicago")
+        if segments:
+            logger.info(f"Fetched {len(segments)} traffic segments from Chicago API")
+        else:
+            logger.debug(f"Chicago Traffic API returned {len(raw_data)} records but none were valid")
+        
         return segments
 
     except httpx.HTTPStatusError as e:
@@ -95,6 +123,7 @@ async def fetch_chicago_traffic(limit: int = 1000) -> List[Dict[str, Any]]:
         return []
 
 
+@ttl_cache_async(ttl_seconds=60, max_entries=32)
 async def fetch_traffic_near_location(lat: float, lng: float, radius_km: float = 2.0) -> List[Dict]:
     """
     Fetch traffic data near a specific location.
@@ -118,7 +147,7 @@ async def fetch_traffic_near_location(lat: float, lng: float, radius_km: float =
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=8.0) as client:
             response = await client.get(CHICAGO_TRAFFIC_URL, params=params)
             response.raise_for_status()
             raw_data = response.json()

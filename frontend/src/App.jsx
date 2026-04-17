@@ -1,13 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
-import ChicagoMap from './components/Map/ChicagoMap';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AlertsPanel from './components/Alerts/AlertsPanel';
 import StatsCards from './components/Dashboard/StatsCards';
-import DataFeed from './components/Dashboard/DataFeed';
-import AISummaryPanel from './components/Dashboard/AISummaryPanel';
 import GeographicRiskPanel from './components/Dashboard/GeographicRiskPanel';
-import TimelineChart from './components/Charts/TimelineChart';
-import EmergencySimPanel, { SimulationOverlay } from './components/Simulation/EmergencySimulation';
-import SimulationView from './components/Simulation/SimulationView';
 import {
   CongestionDistributionChart,
   DisruptionTypesChart,
@@ -15,21 +9,26 @@ import {
   DataSourcesChart,
   ScoreRadarChart,
 } from './components/Charts/AnalyticsCharts';
+import { Activity, Map, BarChart2, AlertTriangle, Newspaper } from 'lucide-react';
+import SectionHeader from './components/SectionHeader';
 import {
   detectDisruptions,
   getChicagoTraffic,
   getChicagoInfrastructure,
   getRedditPosts,
   getAllAlerts,
-  getDisruptionSummary,
   getTravelMidwestCongestion,
   getTravelMidwestIncidents,
   getTravelMidwestRealtime,
-  getTravelMidwestWeather,
   getTravelMidwestConstruction,
   getFacilityStatus,
 } from './services/api';
 import './App.css';
+
+const ChicagoMap = lazy(() => import('./components/Map/ChicagoMap'));
+const DataFeed = lazy(() => import('./components/Dashboard/DataFeed'));
+const TimelineChart = lazy(() => import('./components/Charts/TimelineChart'));
+const SimulationView = lazy(() => import('./components/Simulation/SimulationView'));
 
 const AUTO_REFRESH_OPTIONS = [
   { label: 'Off', value: 0 },
@@ -37,6 +36,143 @@ const AUTO_REFRESH_OPTIONS = [
   { label: '10 min', value: 10 },
   { label: '30 min', value: 30 },
 ];
+
+const MAP_FALLBACK = <div className="empty-state">Loading map intelligence...</div>;
+const LOCAL_TRAFFIC_FALLBACK = [
+  {
+    type: 'Feature',
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [-87.652, 41.899],
+        [-87.646, 41.894],
+        [-87.640, 41.889],
+        [-87.634, 41.884],
+        [-87.629, 41.879],
+        [-87.624, 41.874],
+      ],
+    },
+    properties: {
+      id: 'frontend-fallback-downtown-heavy',
+      cng: 'H',
+    },
+  },
+  {
+    type: 'Feature',
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [-87.644, 41.905],
+        [-87.637, 41.900],
+        [-87.631, 41.895],
+        [-87.625, 41.891],
+        [-87.619, 41.886],
+      ],
+    },
+    properties: {
+      id: 'frontend-fallback-downtown-moderate',
+      cng: 'M',
+    },
+  },
+  {
+    type: 'Feature',
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [-87.666, 41.882],
+        [-87.655, 41.882],
+        [-87.644, 41.882],
+        [-87.633, 41.882],
+        [-87.622, 41.882],
+      ],
+    },
+    properties: {
+      id: 'frontend-fallback-west-to-loop',
+      cng: 'N',
+    },
+  },
+];
+
+function mergeFeatureCollections(primary = [], supplemental = []) {
+  const seen = new Set();
+  const merged = [];
+
+  [...primary, ...supplemental].forEach((feature, index) => {
+    const props = feature?.properties || {};
+    const geometry = feature?.geometry || {};
+    const key = props.id || props.event_id || geometry.coordinates?.join?.(',') || `feature-${index}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    merged.push(feature);
+  });
+
+  return merged;
+}
+
+function summarizeTravelMidwestTraffic(features = []) {
+  const severeCount = features.reduce((count, feature) => {
+    const color = feature?.properties?.color || '';
+    const congestion = feature?.properties?.cng || '';
+    return count + (color.includes('red') || color.includes('(255, 0, 0)') || congestion === 'H' ? 1 : 0);
+  }, 0);
+
+  return {
+    overall_status: severeCount > features.length * 0.1 ? 'critical' : severeCount > features.length * 0.05 ? 'warning' : 'nominal',
+    avg_congestion: features.length > 0 ? severeCount / features.length : 0,
+    severe_count: severeCount,
+  };
+}
+
+async function collectMapData() {
+  const [
+    infrastructureRes,
+    congestionRes,
+    incidentsRes,
+    realtimeRes,
+    constructionRes,
+    facilityStatusRes,
+  ] = await Promise.allSettled([
+    getChicagoInfrastructure(),
+    getTravelMidwestCongestion(),
+    getTravelMidwestIncidents(),
+    getTravelMidwestRealtime(),
+    getTravelMidwestConstruction(),
+    getFacilityStatus(),
+  ]);
+
+  const infrastructure = infrastructureRes.status === 'fulfilled' ? infrastructureRes.value.data?.locations || [] : [];
+  const congestion = congestionRes.status === 'fulfilled' ? congestionRes.value.data?.features || [] : [];
+  const realtime = realtimeRes.status === 'fulfilled' ? realtimeRes.value.data?.features || [] : [];
+  const incidents = incidentsRes.status === 'fulfilled' ? incidentsRes.value.data?.features || [] : [];
+  const construction = constructionRes.status === 'fulfilled' ? constructionRes.value.data?.features || [] : [];
+  const facilityStatus = facilityStatusRes.status === 'fulfilled' ? facilityStatusRes.value.data?.facilities || [] : [];
+  const mergedCongestion = mergeFeatureCollections(congestion, realtime);
+  const infrastructureFromStatus = facilityStatus.map((facility) => ({
+    osm_id: facility.osm_id,
+    name: facility.name,
+    type: facility.type,
+    latitude: facility.latitude,
+    longitude: facility.longitude,
+    address: facility.address,
+    brand: facility.brand,
+    opening_hours: facility.opening_hours?.schedule || null,
+  })).filter((facility) => facility.latitude && facility.longitude);
+  const effectiveInfrastructure = infrastructure.length > 0 ? infrastructure : infrastructureFromStatus;
+  const effectiveCongestion = mergedCongestion.length > 0 ? mergedCongestion : LOCAL_TRAFFIC_FALLBACK;
+
+  return {
+    infrastructure: effectiveInfrastructure,
+    tmCongestion: effectiveCongestion,
+    tmIncidents: incidents,
+    tmConstruction: construction,
+    facilityStatus,
+    trafficAnalysis: summarizeTravelMidwestTraffic(effectiveCongestion),
+  };
+}
+
+function renderLazy(children, fallback = <div className="empty-state">Loading...</div>) {
+  return <Suspense fallback={fallback}>{children}</Suspense>;
+}
 
 function LiveClock() {
   const [time, setTime] = useState(new Date());
@@ -75,13 +211,12 @@ function App() {
   const [newsArticles, setNewsArticles] = useState([]);
   const [tmCongestion, setTmCongestion] = useState([]);
   const [tmIncidents, setTmIncidents] = useState([]);
-  const [tmWeather, setTmWeather] = useState([]);
   const [tmConstruction, setTmConstruction] = useState([]);
   const [summary, setSummary] = useState({});
   const [dataSources, setDataSources] = useState({});
   const [trafficAnalysis, setTrafficAnalysis] = useState({});
   const [selectedDisruption, setSelectedDisruption] = useState(null);
-  const [simConfig, setSimConfig] = useState({ scenario: null, vehicles: [], running: false, onPhaseChange: null });
+  const [simConfig] = useState({ scenario: null, vehicles: [], running: false, onPhaseChange: null });
   const [facilityStatus, setFacilityStatus] = useState([]);
 
   const [showTraffic, setShowTraffic] = useState(true);
@@ -96,6 +231,7 @@ function App() {
   const [countdown, setCountdown] = useState(0);
   const refreshTimerRef = useRef(null);
   const countdownRef = useRef(null);
+  const requestIdRef = useRef(0);
 
   // Backend status
   const [backendOnline, setBackendOnline] = useState(null);
@@ -105,143 +241,47 @@ function App() {
     fetch('/api/health').then(r => setBackendOnline(r.ok)).catch(() => setBackendOnline(false));
   }, []);
 
-  // Auto-load infrastructure + TM traffic on mount so the map is live immediately
-  useEffect(() => {
-    const loadMapData = async () => {
-      // Infrastructure
-      try {
-        const r = await getChicagoInfrastructure();
-        setInfrastructure(r.data.locations || []);
-      } catch (e) { console.warn('Infrastructure auto-load failed:', e.message); }
-
-      // TravelMidwest congestion lines — the main visible traffic overlay
-      try {
-        const r = await getTravelMidwestCongestion();
-        if (r.data?.features) {
-          const features = r.data.features;
-          setTmCongestion(features);
-          let severe = 0;
-          features.forEach(f => {
-            const cng = f.properties?.cng || '';
-            if (cng === 'H') severe++;
-          });
-          setTrafficAnalysis({
-            overall_status: severe > features.length * 0.1 ? 'critical' : severe > features.length * 0.05 ? 'warning' : 'nominal',
-            avg_congestion: features.length > 0 ? severe / features.length : 0,
-            severe_count: severe,
-          });
-          setDataSources(prev => ({ ...prev, traffic_segments: features.length }));
-        }
-      } catch (e) { console.warn('TM Congestion auto-load failed:', e.message); }
-
-      // TravelMidwest incidents
-      try {
-        const r = await getTravelMidwestIncidents();
-        if (r.data?.features) setTmIncidents(r.data.features);
-      } catch (e) { console.warn('TM Incidents auto-load failed:', e.message); }
-
-      // TravelMidwest realtime (merged into congestion)
-      try {
-        const r = await getTravelMidwestRealtime();
-        if (r.data?.features) {
-          setTmCongestion(prev => {
-            const ids = new Set(prev.map(f => f.properties?.id));
-            return [...prev, ...r.data.features.filter(f => !ids.has(f.properties?.id))];
-          });
-        }
-      } catch (e) { console.warn('TM Realtime auto-load failed:', e.message); }
-
-      // TravelMidwest weather
-      try {
-        const r = await getTravelMidwestWeather();
-        if (r.data?.features) setTmWeather(r.data.features);
-      } catch (e) { console.warn('TM Weather auto-load failed:', e.message); }
-
-      // TravelMidwest construction
-      try {
-        const r = await getTravelMidwestConstruction();
-        if (r.data?.features) setTmConstruction(r.data.features);
-      } catch (e) { console.warn('TM Construction auto-load failed:', e.message); }
-    };
-
-    loadMapData();
-  }, []);
-
   const runDetection = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError(null);
     try {
-      const detectionRes = await detectDisruptions(300, 50);
-      const data = detectionRes.data;
-      setDisruptions(data.disruptions || []);
-      setAlerts(data.alerts || []);
-      setSummary(data.summary || {});
-      setDataSources(data.data_sources || {});
-      setTrafficAnalysis(data.traffic_analysis || {});
+      const [detectionRes, trafficRes, socialRes, alertsRes, mapData] = await Promise.all([
+        detectDisruptions(300, 50),
+        getChicagoTraffic(300),
+        getRedditPosts(50),
+        getAllAlerts(),
+        collectMapData(),
+      ]);
 
-      try { const r = await getChicagoTraffic(500); setTrafficData(r.data.segments || []); }
-      catch (e) { console.warn('Traffic fetch failed:', e.message); }
+      if (requestId !== requestIdRef.current) return;
 
-      try { const r = await getChicagoInfrastructure(); setInfrastructure(r.data.locations || []); }
-      catch (e) { console.warn('Infrastructure fetch failed:', e.message); }
+      const detectionData = detectionRes.data || {};
+      const alertsData = alertsRes.data?.alerts || [];
 
-      try { const r = await getRedditPosts(50); setSocialPosts(r.data.posts || []); }
-      catch (e) { console.warn('Social media fetch failed:', e.message); }
-
-      try {
-        const r = await getAllAlerts();
-        setWeatherAlerts((r.data.alerts || []).filter(a => a.type === 'weather'));
-        setNewsArticles((r.data.alerts || []).filter(a => a.type === 'news'));
-      } catch (e) { console.warn('Alerts fetch failed:', e.message); }
-
-      try {
-        const r = await getTravelMidwestCongestion();
-        if (r.data?.features) {
-          const features = r.data.features;
-          setTmCongestion(features);
-          let severe = 0;
-          features.forEach(f => {
-            const color = f.properties.color || '';
-            const cng = f.properties.cng || '';
-            if (color.includes('red') || color.includes('(255, 0, 0)') || cng === 'H') severe++;
-          });
-          setTrafficAnalysis(prev => ({
-            ...prev,
-            overall_status: severe > features.length * 0.1 ? 'critical' : (severe > features.length * 0.05 ? 'warning' : 'nominal'),
-            avg_congestion: features.length > 0 ? severe / features.length : 0,
-            severe_count: severe,
-          }));
-          setDataSources(prev => ({ ...prev, traffic: `TravelMidwest (${features.length} segs)` }));
-        }
-      } catch (e) { console.warn('TM Congestion failed:', e.message); }
-
-      try { const r = await getTravelMidwestIncidents(); if (r.data?.features) setTmIncidents(r.data.features); }
-      catch (e) { console.warn('TM Incidents failed:', e.message); }
-
-      try {
-        const r = await getTravelMidwestRealtime();
-        if (r.data?.features) {
-          setTmCongestion(prev => {
-            const ids = new Set(prev.map(f => f.properties?.id));
-            return [...prev, ...r.data.features.filter(f => !ids.has(f.properties?.id))];
-          });
-        }
-      } catch (e) { console.warn('TM Realtime failed:', e.message); }
-
-      try { const r = await getTravelMidwestWeather(); if (r.data?.features) setTmWeather(r.data.features); }
-      catch (e) { console.warn('TM Weather failed:', e.message); }
-
-      try { const r = await getTravelMidwestConstruction(); if (r.data?.features) setTmConstruction(r.data.features); }
-      catch (e) { console.warn('TM Construction failed:', e.message); }
-
-      // ── Facility Status Analysis ──
-      try {
-        const r = await getFacilityStatus();
-        if (r.data?.facilities) {
-          setFacilityStatus(r.data.facilities);
-          console.log(`Facility status: ${r.data.facilities.length} facilities analyzed`);
-        }
-      } catch (e) { console.warn('Facility status failed:', e.message); }
+      setDisruptions(detectionData.disruptions || []);
+      setAlerts(detectionData.alerts || []);
+      setSummary(detectionData.summary || {});
+      setTrafficData(trafficRes.data?.segments || []);
+      setSocialPosts(socialRes.data?.posts || []);
+      setWeatherAlerts(alertsData.filter(a => a.type === 'weather'));
+      setNewsArticles(alertsData.filter(a => a.type === 'news'));
+      setInfrastructure(mapData.infrastructure);
+      setTmCongestion(mapData.tmCongestion);
+      setTmIncidents(mapData.tmIncidents);
+      setTmConstruction(mapData.tmConstruction);
+      setFacilityStatus(mapData.facilityStatus);
+      setTrafficAnalysis({
+        ...(detectionData.traffic_analysis || {}),
+        ...mapData.trafficAnalysis,
+      });
+      setDataSources({
+        ...(detectionData.data_sources || {}),
+        traffic: `TravelMidwest (${mapData.tmCongestion.length} segs)`,
+        traffic_segments: mapData.tmCongestion.length || detectionData.data_sources?.traffic_segments || 0,
+        infrastructure_locations: mapData.infrastructure.length || detectionData.data_sources?.infrastructure_locations || 0,
+      });
 
       setLastUpdated(new Date());
       setBackendOnline(true);
@@ -253,17 +293,13 @@ function App() {
     }
   }, []);
 
-  const fetchSummary = useCallback(async () => {
-    try {
-      const res = await getDisruptionSummary();
-      setTrafficAnalysis({
-        overall_status: res.data.traffic_status,
-        avg_congestion: res.data.avg_congestion,
-        severe_count: res.data.severe_segments,
-      });
-      setWeatherAlerts(res.data.weather_alerts || []);
-    } catch (e) { console.warn('Summary fetch failed:', e.message); }
-  }, []);
+  // Auto-run disruption detection on mount
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      runDetection();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [runDetection]);
 
   // Auto-refresh logic
   useEffect(() => {
@@ -310,8 +346,7 @@ function App() {
     },
     {
       id: 'simulation', label: 'Simulation',
-      icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
-      badge: '🚑'
+      icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
     },
     {
       id: 'analytics', label: 'Analytics',
@@ -323,13 +358,17 @@ function App() {
     },
   ];
 
-  const mapProps = {
+  const mapProps = useMemo(() => ({
     trafficData, infrastructure, disruptions, selectedLocation,
     showTraffic, showInfrastructure, showDisruptions, onLocationClick: handleAlertClick,
     travelMidwestCongestion: tmCongestion, travelMidwestIncidents: tmIncidents,
-    travelMidwestWeather: tmWeather, travelMidwestConstruction: tmConstruction,
+    travelMidwestConstruction: tmConstruction,
     simConfig, facilityStatus,
-  };
+  }), [
+    trafficData, infrastructure, disruptions, selectedLocation,
+    showTraffic, showInfrastructure, showDisruptions, tmCongestion,
+    tmIncidents, tmConstruction, simConfig, facilityStatus,
+  ]);
 
   return (
     <div className="app">
@@ -394,10 +433,6 @@ function App() {
               : <><svg width="11" height="11" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg> Run Detection</>
             }
           </button>
-          <button className="btn-summary" onClick={fetchSummary}>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            Quick Status
-          </button>
           {lastUpdated && (
             <span className="last-updated">
               {lastUpdated.toLocaleTimeString()}
@@ -419,24 +454,30 @@ function App() {
         {/* ── DASHBOARD ── */}
         {activeTab === 'dashboard' && (
           <div className="dashboard-layout">
+            {/* Stats Cards Section */}
+            <SectionHeader 
+              icon={<Activity size={18} className="text-indigo-400" />}
+              title="Live Disruption Metrics"
+              subtitle="Real-time supply chain status"
+              description="Monitor critical supply chain disruptions across Chicago. These metrics aggregate data from traffic patterns, social media reports, infrastructure monitoring, and news sources to provide a comprehensive view of supply chain health."
+            />
             <StatsCards summary={summary} dataSources={dataSources} trafficAnalysis={trafficAnalysis} loading={loading} />
 
-            {/* AI Summary + Timeline row */}
-            <div className="ai-row">
-              <AISummaryPanel autoFetch={false} />
-              <TimelineChart />
+            {/* Timeline row */}
+            <div className="ai-row" style={{ gridTemplateColumns: '1fr' }}>
+              {renderLazy(<TimelineChart />)}
             </div>
 
+            {/* Map Section */}
+            <SectionHeader 
+              icon={<Map size={18} className="text-blue-400" />}
+              title="Live Geographic Intelligence"
+              subtitle="Real-time situational awareness"
+              description="Interactive map showing real-time traffic congestion, infrastructure locations (fuel stations, grocery stores, hospitals), and detected disruption hotspots. The overlay includes Travel Midwest congestion data, incident reports, and weather conditions affecting supply chains."
+            />
             <div className="dashboard-grid">
               <div className="dashboard-map-section">
-                <div className="section-header">
-                  <h3>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
-                      <line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/>
-                    </svg>
-                    Chicago Disruption Map
-                  </h3>
+                <div className="section-controls">
                   <div className="map-controls">
                     <label className="toggle-label">
                       <input type="checkbox" checked={showTraffic} onChange={e => setShowTraffic(e.target.checked)} />
@@ -452,7 +493,7 @@ function App() {
                     </label>
                   </div>
                 </div>
-                <ChicagoMap {...mapProps} />
+                {renderLazy(<ChicagoMap {...mapProps} />, MAP_FALLBACK)}
               </div>
 
               <div className="dashboard-right-col">
@@ -533,13 +574,19 @@ function App() {
                 {trafficData.length} segments · {infrastructure.length} locations · {disruptions.length} disruptions
               </span>
             </div>
-            <ChicagoMap {...mapProps} />
+            {renderLazy(<ChicagoMap {...mapProps} />, MAP_FALLBACK)}
           </div>
         )}
 
         {/* ── ANALYTICS ── */}
         {activeTab === 'analytics' && (
           <div className="analytics-layout">
+            <SectionHeader 
+              icon={<BarChart2 size={18} className="text-green-400" />}
+              title="Advanced Analytics & Insights"
+              subtitle="Data-driven disruption analysis"
+              description="Comprehensive visualization of disruption patterns, severity distribution, traffic congestion analysis, and multimodal data source contributions. Use these charts to understand disruption trends and identify critical supply chain vulnerabilities."
+            />
             <div className="analytics-grid">
               <CongestionDistributionChart data={trafficAnalysis.congestion_distribution} />
               <DisruptionTypesChart disruptions={disruptions} />
@@ -549,8 +596,14 @@ function App() {
             </div>
 
             {disruptions.length > 0 && (
+              <div>
+              <SectionHeader 
+                icon={<AlertTriangle size={18} className="text-orange-400" />}
+                title="Detected Supply Chain Disruptions"
+                subtitle="Prioritized by severity and impact"
+                description="All identified disruptions with multimodal score breakdown. Each disruption is characterized by traffic impact, social media sentiment, infrastructure proximity, and news relevance. Click to view on map or inspect detailed factors."
+              />
               <div className="disruptions-table-section">
-                <h3>Detected Disruptions</h3>
                 <div className="table-wrapper">
                   <table className="disruptions-table">
                     <thead>
@@ -581,6 +634,7 @@ function App() {
                   </table>
                 </div>
               </div>
+              </div>
             )}
 
             {disruptions.length === 0 && !loading && (
@@ -594,45 +648,20 @@ function App() {
         )}
 
         {/* ── SIMULATION ── */}
-        {activeTab === 'simulation' && (
-          <div className="simulation-layout">
-            <div className="sim-intro">
-              <div className="sim-intro-icon">⚡</div>
-              <div>
-                <h2 className="sim-intro-title">Emergency Vehicle Routing Simulation</h2>
-                <p className="sim-intro-desc">
-                  Simulate how emergency vehicles (ambulances, fire trucks, police, supply convoys)
-                  navigate around blocked roads during natural disasters in Chicago.
-                  Select a disaster scenario and vehicle types, then watch the real-time rerouting simulation.
-                </p>
-              </div>
-            </div>
-
-            <div className="sim-main-grid">
-              <div className="sim-map-area">
-                <ChicagoMap {...mapProps} isSimulationTab={true} />
-              </div>
-              <div className="sim-sidebar">
-                <EmergencySimPanel onSimChange={(cfg) => setSimConfig({ ...cfg })} />
-
-                <div className="sim-info-card">
-                  <div className="sim-info-title">🗺 How it works</div>
-                  <div className="sim-info-steps">
-                    <div className="sim-info-step"><span className="sim-step-num">1</span>Select a disaster scenario (flood, tornado, fire, collapse)</div>
-                    <div className="sim-info-step"><span className="sim-step-num">2</span>Choose which vehicle types to dispatch</div>
-                    <div className="sim-info-step"><span className="sim-step-num">3</span>Click "Run Simulation" — watch vehicles reroute around blocked roads</div>
-                    <div className="sim-info-step"><span className="sim-step-num">4</span>Red lines = blocked roads · Green lines = alternate route</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {activeTab === 'simulation' && renderLazy(<SimulationView />)}
 
         {/* ── FEED ── */}
         {activeTab === 'feed' && (
           <div className="feed-layout">
-            <DataFeed socialPosts={socialPosts} newsArticles={newsArticles} weatherAlerts={weatherAlerts} />
+            <SectionHeader 
+              icon={<Newspaper size={18} className="text-violet-400" />}
+              title="Live Multi-Source Data Feed"
+              subtitle="Aggregated disruption intelligence"
+              description="Real-time aggregation of all disruption signals: social media posts from Chicago communities, weather alerts from the National Weather Service, and news articles. Each source contributes to the multimodal analysis of supply chain disruptions."
+            />
+            {renderLazy(
+              <DataFeed socialPosts={socialPosts} newsArticles={newsArticles} weatherAlerts={weatherAlerts} />
+            )}
           </div>
         )}
       </main>

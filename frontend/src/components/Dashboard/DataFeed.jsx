@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { Layers, CloudRain, MessageSquare, Newspaper, CloudLightning, MapPin, User, ArrowUp, Link as LinkIcon } from 'lucide-react';
 
 const SENTIMENT_COLORS = {
   negative: { color: '#f43f5e', bg: 'rgba(244,63,94,0.12)', label: '⬇ Negative' },
@@ -14,9 +15,10 @@ const DISRUPTION_KEYWORDS = [
 function highlightKeywords(text) {
   if (!text) return '';
   const regex = new RegExp(`(${DISRUPTION_KEYWORDS.join('|')})`, 'gi');
+  const detector = new RegExp(`^(${DISRUPTION_KEYWORDS.join('|')})$`, 'i');
   const parts = text.split(regex);
   return parts.map((part, i) =>
-    regex.test(part)
+    detector.test(part)
       ? <mark key={i} className="feed-keyword">{part}</mark>
       : part
   );
@@ -36,10 +38,10 @@ function SentimentBar({ sentiment }) {
 }
 
 const TABS = [
-  { id: 'all',     label: 'All',     icon: '◎' },
-  { id: 'weather', label: 'Weather', icon: '☁' },
-  { id: 'social',  label: 'Social',  icon: '💬' },
-  { id: 'news',    label: 'News',    icon: '📰' },
+  { id: 'all',     label: 'All',     icon: <Layers size={14} /> },
+  { id: 'weather', label: 'Weather', icon: <CloudRain size={14} /> },
+  { id: 'social',  label: 'Social',  icon: <MessageSquare size={14} /> },
+  { id: 'news',    label: 'News',    icon: <Newspaper size={14} /> },
 ];
 
 export default function DataFeed({ socialPosts = [], newsArticles = [], weatherAlerts = [] }) {
@@ -55,14 +57,14 @@ export default function DataFeed({ socialPosts = [], newsArticles = [], weatherA
 
   const allItems = useMemo(() => {
     const weather = weatherAlerts.map(a => ({
-      type: 'weather', icon: '⛈',
+      type: 'weather', icon: <CloudLightning size={14} />,
       title: a.title || a.event || 'Weather Alert',
       text: a.message || a.headline || a.description?.slice(0, 300),
       severity: a.severity, time: a.timestamp || a.effective,
       areas: a.areas,
     }));
     const social = socialPosts.slice(0, 30).map(p => ({
-      type: 'social', icon: '💬',
+      type: 'social', icon: <MessageSquare size={14} />,
       title: p.subreddit ? `r/${p.subreddit}` : 'Social Media',
       text: p.text?.slice(0, 300),
       sentiment: p.sentiment,
@@ -73,7 +75,7 @@ export default function DataFeed({ socialPosts = [], newsArticles = [], weatherA
       comments: p.num_comments,
     }));
     const news = newsArticles.slice(0, 15).map(n => ({
-      type: 'news', icon: '📰',
+      type: 'news', icon: <Newspaper size={14} />,
       title: n.title?.slice(0, 100) || 'News Article',
       text: n.text?.slice(0, 300) || n.message?.slice(0, 300),
       url: n.url,
@@ -123,7 +125,7 @@ export default function DataFeed({ socialPosts = [], newsArticles = [], weatherA
       <div className="feed-list">
         {filtered.length === 0 ? (
           <div className="feed-empty">
-            <div className="feed-empty-icon">◎</div>
+            <div className="feed-empty-icon"><Layers size={24} /></div>
             <p>No {activeTab !== 'all' ? activeTab : ''} data yet.</p>
             <p className="feed-empty-hint">Click "Run Detection" to fetch live data.</p>
           </div>
@@ -137,7 +139,7 @@ export default function DataFeed({ socialPosts = [], newsArticles = [], weatherA
                 onClick={() => setExpandedIdx(isExpanded ? null : index)}
               >
                 <div className="feed-item-icon-col">
-                  <span className="feed-icon-circle feed-icon-circle-{item.type}">{item.icon}</span>
+                  <span className={`feed-icon-circle feed-icon-circle-${item.type}`}>{item.icon}</span>
                   <div className="feed-item-line" />
                 </div>
 
@@ -164,10 +166,10 @@ export default function DataFeed({ socialPosts = [], newsArticles = [], weatherA
 
                   {isExpanded && (
                     <div className="feed-expanded-detail">
-                      {item.areas && <div className="feed-detail-row"><span>📍</span>{item.areas}</div>}
-                      {item.author && <div className="feed-detail-row"><span>👤</span>Posted by u/{item.author}</div>}
-                      {item.score != null && <div className="feed-detail-row"><span>⬆</span>{item.score} pts · {item.comments} comments</div>}
-                      {item.source && <div className="feed-detail-row"><span>🔗</span>{item.source}</div>}
+                      {item.areas && <div className="feed-detail-row"><MapPin size={14} />{item.areas}</div>}
+                      {item.author && <div className="feed-detail-row"><User size={14} />Posted by u/{item.author}</div>}
+                      {item.score != null && <div className="feed-detail-row"><ArrowUp size={14} />{item.score} pts · {item.comments} comments</div>}
+                      {item.source && <div className="feed-detail-row"><LinkIcon size={14} />{item.source}</div>}
                       {item.url && (
                         <a href={item.url} target="_blank" rel="noopener noreferrer" className="feed-link" onClick={e => e.stopPropagation()}>
                           Read full article →
