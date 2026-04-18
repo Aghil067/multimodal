@@ -6,19 +6,17 @@ python-dotenv
 # HTTP
 httpx
 
-# Database (optional - system works without it)
+# Database (optional)
 sqlalchemy
 
-# NLP / AI (CPU Optimized for Deployment)
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==2.1.2+cpu
-torchvision==0.16.2+cpu
+# AI (CPU safe)
+torch
 transformers
 scikit-learn
 
-# Data Processing
+# Data
 pandas
 numpy
 
-# Utilities
+# Utils
 pydantic
