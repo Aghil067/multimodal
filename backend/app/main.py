@@ -5,6 +5,7 @@ during Disaster Response Operations – Case Study: Chicago
 FastAPI Application Entry Point
 """
 import logging
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -17,6 +18,36 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def _parse_cors_origins() -> tuple[list[str], str | None]:
+    """Build CORS origins from deployment environment variables."""
+    raw_origins = os.getenv("CORS_ORIGINS", "")
+    vercel_frontend_url = os.getenv("VERCEL_FRONTEND_URL", "")
+
+    origins = [
+        origin.strip().rstrip("/")
+        for origin in raw_origins.split(",")
+        if origin.strip()
+    ]
+
+    if vercel_frontend_url.strip():
+        origins.append(vercel_frontend_url.strip().rstrip("/"))
+
+    if not origins:
+        origins = [
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:5174",
+        ]
+
+    deduped_origins = list(dict.fromkeys(origins))
+    allow_origin_regex = ".*" if "*" in deduped_origins else None
+
+    if allow_origin_regex:
+        deduped_origins = [origin for origin in deduped_origins if origin != "*"]
+
+    return deduped_origins, allow_origin_regex
 
 
 @asynccontextmanager
@@ -53,9 +84,12 @@ app = FastAPI(
 )
 
 # CORS middleware
+cors_origins, cors_origin_regex = _parse_cors_origins()
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
