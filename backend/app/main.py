@@ -6,9 +6,10 @@ FastAPI Application Entry Point
 """
 import logging
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 
 from app.config import settings
 
@@ -20,8 +21,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _parse_cors_origins() -> tuple[list[str], str | None]:
-    """Build CORS origins from deployment environment variables."""
+def _is_truthy(value: str) -> bool:
+    """Interpret common truthy environment variable values."""
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_cors_config() -> tuple[list[str], str | None]:
+    """Build CORS configuration from environment variables for Railway deployment."""
+    if _is_truthy(os.getenv("ALLOW_ALL_CORS", "false")):
+        return [], ".*"
+
     raw_origins = os.getenv("CORS_ORIGINS", "")
     vercel_frontend_url = os.getenv("VERCEL_FRONTEND_URL", "")
 
@@ -43,12 +52,7 @@ def _parse_cors_origins() -> tuple[list[str], str | None]:
         ]
 
     deduped_origins = list(dict.fromkeys(origins))
-    allow_origin_regex = ".*" if "*" in deduped_origins else None
-
-    if allow_origin_regex:
-        deduped_origins = [origin for origin in deduped_origins if origin != "*"]
-
-    return deduped_origins, allow_origin_regex
+    return deduped_origins, None
 
 
 @asynccontextmanager
@@ -85,7 +89,7 @@ app = FastAPI(
 )
 
 # CORS middleware
-cors_origins, cors_origin_regex = _parse_cors_origins()
+cors_origins, cors_origin_regex = _parse_cors_config()
 
 app.add_middleware(
     CORSMiddleware,
@@ -146,3 +150,9 @@ async def health_check():
         }
     }
     return health
+
+
+@app.get("/health", tags=["Health"], include_in_schema=False)
+async def health_check_alias():
+    """Alias route to simplify Railway uptime checks."""
+    return await health_check()
