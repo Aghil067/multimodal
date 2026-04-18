@@ -9,8 +9,10 @@ httpx
 # Database (optional)
 sqlalchemy
 
-# AI (CPU safe)
+# NLP / AI (CPU Optimized for Deployment)
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
+torchvision
 transformers
 scikit-learn
 

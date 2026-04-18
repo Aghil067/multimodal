@@ -1,0 +1,13 @@
+venv310
+venv
+.git
+.github
+*.md
+.env
+__pycache__
+*.pyc
+.pytest_cache
+.vscode
+frontend/
+*.egg-info/
+.pytest/
