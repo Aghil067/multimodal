@@ -36,6 +36,7 @@ def _parse_cors_origins() -> tuple[list[str], str | None]:
 
     if not origins:
         origins = [
+            "https://multimodal-chi.vercel.app",
             "http://localhost:3000",
             "http://localhost:5173",
             "http://localhost:5174",
